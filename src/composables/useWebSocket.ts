@@ -8,6 +8,14 @@ import { useTTSStore } from '@/stores/tts'
 import { extractLive2dExpression } from '@/utils/live2dExpression'
 import { WebSocketManager } from '@/utils/websocket'
 
+interface AsrTranscriptData {
+  text?: string
+  chat_id?: string
+  character_id?: string
+  generation_id?: string
+  is_final?: boolean
+}
+
 export function useWebSocket() {
   const wsStore = useWebSocketStore()
   const chatStore = useChatStore()
@@ -82,6 +90,20 @@ export function useWebSocket() {
       const errorData = data as { message?: string }
       wsStore.error = errorData.message || '对话错误'
       chatStore.isStreaming = false
+    })
+
+    wsManager.on('asr:transcript', (data: unknown) => {
+      const transcriptData = data as AsrTranscriptData
+      if (!transcriptData.is_final || !transcriptData.text || !transcriptData.chat_id) {
+        return
+      }
+
+      chatStore.addAsrTranscriptMessage({
+        chatId: transcriptData.chat_id,
+        characterId: transcriptData.character_id,
+        text: transcriptData.text,
+        generationId: transcriptData.generation_id
+      })
     })
 
     wsManager.on('vad:interrupt', () => {

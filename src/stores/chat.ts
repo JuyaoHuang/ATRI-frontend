@@ -100,6 +100,31 @@ export const useChatStore = defineStore('chat', {
       this.messages.push(message)
     },
 
+    addAsrTranscriptMessage(payload: {
+      chatId: string
+      characterId?: string
+      text: string
+      generationId?: string
+    }) {
+      const content = payload.text.trim()
+      if (!content || this.currentChatId !== payload.chatId) {
+        return
+      }
+      if (payload.characterId && this.currentCharacterId !== payload.characterId) {
+        return
+      }
+
+      this.messages.push({
+        id: `asr_${payload.generationId || Date.now()}`,
+        chat_id: payload.chatId,
+        role: 'human',
+        content,
+        timestamp: new Date().toISOString()
+      })
+      this.streamingText = ''
+      this.isStreaming = true
+    },
+
     appendStreamingChunk(chunk: string) {
       this.streamingText += chunk
     },
