@@ -104,6 +104,13 @@ export interface ASRTranscriptionResponse {
   text: string
 }
 
+export interface ASRUploadMetadata {
+  source: string
+  sample_rate: number
+  channels: number
+  encoding: string
+}
+
 // TTS related
 export type TTSProviderConfig = Record<string, string | number | boolean | null | undefined>
 
