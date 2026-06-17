@@ -84,6 +84,10 @@ export function useWebSocket() {
       chatStore.isStreaming = false
     })
 
+    wsManager.on('vad:interrupt', () => {
+      audioPlayer.stop()
+    })
+
     wsManager.connect()
     wsStore.wsManager = wsManager
   }
