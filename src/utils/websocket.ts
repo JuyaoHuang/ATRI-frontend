@@ -68,6 +68,15 @@ export class WebSocketManager {
     }
   }
 
+  sendIfOpen(message: unknown): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      return false
+    }
+
+    this.ws.send(JSON.stringify(message))
+    return true
+  }
+
   on(event: string, callback: (data?: unknown) => void): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, [])
