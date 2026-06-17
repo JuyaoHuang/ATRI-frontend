@@ -7,8 +7,11 @@ const TARGET_SAMPLE_RATE = 16000
 const PROCESSOR_BUFFER_SIZE = 4096
 const AUDIO_CHUNK_TYPE = 'input:audio:chunk'
 const AUDIO_END_TYPE = 'input:audio:end'
+const LISTEN_STATE_EVENT = 'vad:listen-state'
+const SPEAKING_STATES = new Set(['speech_start', 'speech_chunk'])
 
 type AudioContextConstructor = new (options?: AudioContextOptions) => AudioContext
+type VadListenState = 'speech_start' | 'speech_chunk' | 'speech_end' | 'silence' | 'error'
 
 type AudioWindow = Window & {
   webkitAudioContext?: AudioContextConstructor
@@ -40,6 +43,17 @@ interface RealtimeAudioEndMessage {
 interface StopOptions {
   notifyBackend?: boolean
   errorMessage?: string
+}
+
+interface VadListenStateData {
+  chat_id?: string
+  character_id?: string
+  state?: string
+  is_speech?: boolean
+  seq?: number
+  probability?: number
+  energy?: number
+  reason?: string
 }
 
 function errorMessage(error: unknown): string {
@@ -131,6 +145,40 @@ function buildAudioEndMessage(session: RealtimeVoiceInputSession): RealtimeAudio
   }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null
+}
+
+function parseListenState(data: unknown): VadListenStateData | null {
+  if (!isRecord(data)) {
+    return null
+  }
+
+  return {
+    chat_id: typeof data.chat_id === 'string' ? data.chat_id : undefined,
+    character_id: typeof data.character_id === 'string' ? data.character_id : undefined,
+    state: typeof data.state === 'string' ? data.state : undefined,
+    is_speech: typeof data.is_speech === 'boolean' ? data.is_speech : undefined,
+    seq: typeof data.seq === 'number' ? data.seq : undefined,
+    probability: typeof data.probability === 'number' ? data.probability : undefined,
+    energy: typeof data.energy === 'number' ? data.energy : undefined,
+    reason: typeof data.reason === 'string' ? data.reason : undefined
+  }
+}
+
+function normalizeListenState(state: string | undefined): VadListenState {
+  switch (state) {
+    case 'speech_start':
+    case 'speech_chunk':
+    case 'speech_end':
+    case 'silence':
+    case 'error':
+      return state
+    default:
+      return 'silence'
+  }
+}
+
 export function useRealtimeVoiceInput() {
   const asrStore = useASRStore()
   const wsStore = useWebSocketStore()
@@ -139,6 +187,10 @@ export function useRealtimeVoiceInput() {
   const isStarting = ref(false)
   const error = ref<string | null>(null)
   const seq = ref(0)
+  const listenState = ref<VadListenState>('silence')
+  const isSpeech = ref(false)
+  const probability = ref<number | null>(null)
+  const energy = ref<number | null>(null)
 
   let activeSession: RealtimeVoiceInputSession | null = null
   let mediaStream: MediaStream | null = null
@@ -148,6 +200,41 @@ export function useRealtimeVoiceInput() {
   let muteGainNode: GainNode | null = null
 
   const canStart = computed(() => asrStore.moduleEnabled && wsStore.connected)
+  const isSpeaking = computed(() => isListening.value && (isSpeech.value || SPEAKING_STATES.has(listenState.value)))
+
+  function resetListenState() {
+    listenState.value = 'silence'
+    isSpeech.value = false
+    probability.value = null
+    energy.value = null
+  }
+
+  function handleListenState(data?: unknown) {
+    const listenStateData = parseListenState(data)
+    if (!activeSession || !listenStateData) {
+      return
+    }
+
+    if (
+      listenStateData.chat_id !== activeSession.chatId ||
+      listenStateData.character_id !== activeSession.characterId
+    ) {
+      return
+    }
+
+    listenState.value = normalizeListenState(listenStateData.state)
+    isSpeech.value = Boolean(listenStateData.is_speech)
+    probability.value = listenStateData.probability ?? null
+    energy.value = listenStateData.energy ?? null
+
+    if (listenState.value === 'error') {
+      error.value = listenStateData.reason || 'Realtime VAD processing failed'
+    }
+  }
+
+  function detachListenStateListener() {
+    wsStore.wsManager?.off(LISTEN_STATE_EVENT, handleListenState)
+  }
 
   function cleanupAudioGraph() {
     processorNode?.disconnect()
@@ -171,6 +258,7 @@ export function useRealtimeVoiceInput() {
     muteGainNode = null
     isListening.value = false
     isStarting.value = false
+    resetListenState()
   }
 
   async function stop(options: StopOptions = {}) {
@@ -254,6 +342,7 @@ export function useRealtimeVoiceInput() {
 
     isStarting.value = true
     seq.value = 0
+    resetListenState()
     activeSession = { ...session }
 
     try {
@@ -291,6 +380,15 @@ export function useRealtimeVoiceInput() {
   }
 
   watch(
+    () => wsStore.wsManager,
+    (manager, previousManager) => {
+      previousManager?.off(LISTEN_STATE_EVENT, handleListenState)
+      manager?.on(LISTEN_STATE_EVENT, handleListenState)
+    },
+    { immediate: true }
+  )
+
+  watch(
     () => wsStore.connected,
     (connected) => {
       if (!connected && (isListening.value || isStarting.value)) {
@@ -303,15 +401,21 @@ export function useRealtimeVoiceInput() {
   )
 
   onUnmounted(() => {
+    detachListenStateListener()
     void stop()
   })
 
   return {
     isListening,
     isStarting,
+    isSpeaking,
     canStart,
     error,
     seq,
+    listenState,
+    isSpeech,
+    probability,
+    energy,
     start,
     stop
   }

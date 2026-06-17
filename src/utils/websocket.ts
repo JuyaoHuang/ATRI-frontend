@@ -1,9 +1,11 @@
+type WebSocketListener = (data?: unknown) => void
+
 export class WebSocketManager {
   private ws: WebSocket | null = null
   private reconnectTimer: number | null = null
   private heartbeatTimer: number | null = null
   private messageQueue: unknown[] = []
-  private listeners: Map<string, ((data?: unknown) => void)[]> = new Map()
+  private listeners: Map<string, WebSocketListener[]> = new Map()
   private url: string
 
   constructor(url: string) {
@@ -77,11 +79,26 @@ export class WebSocketManager {
     return true
   }
 
-  on(event: string, callback: (data?: unknown) => void): void {
+  on(event: string, callback: WebSocketListener): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, [])
     }
     this.listeners.get(event)!.push(callback)
+  }
+
+  off(event: string, callback: WebSocketListener): void {
+    const callbacks = this.listeners.get(event)
+    if (!callbacks) {
+      return
+    }
+
+    const nextCallbacks = callbacks.filter(item => item !== callback)
+    if (nextCallbacks.length === 0) {
+      this.listeners.delete(event)
+      return
+    }
+
+    this.listeners.set(event, nextCallbacks)
   }
 
   private emit(event: string, data?: unknown): void {
