@@ -53,6 +53,8 @@ interface VadListenStateData {
   seq?: number
   probability?: number
   energy?: number
+  code?: string
+  message?: string
   reason?: string
 }
 
@@ -162,6 +164,8 @@ function parseListenState(data: unknown): VadListenStateData | null {
     seq: typeof data.seq === 'number' ? data.seq : undefined,
     probability: typeof data.probability === 'number' ? data.probability : undefined,
     energy: typeof data.energy === 'number' ? data.energy : undefined,
+    code: typeof data.code === 'string' ? data.code : undefined,
+    message: typeof data.message === 'string' ? data.message : undefined,
     reason: typeof data.reason === 'string' ? data.reason : undefined
   }
 }
@@ -228,7 +232,7 @@ export function useRealtimeVoiceInput() {
     energy.value = listenStateData.energy ?? null
 
     if (listenState.value === 'error') {
-      error.value = listenStateData.reason || 'Realtime VAD processing failed'
+      error.value = listenStateData.message || listenStateData.reason || listenStateData.code || 'Realtime VAD processing failed'
     }
   }
 
