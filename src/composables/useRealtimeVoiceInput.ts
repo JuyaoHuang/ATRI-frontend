@@ -5,6 +5,7 @@ import { useWebSocketStore } from '@/stores/websocket'
 
 const TARGET_SAMPLE_RATE = 16000
 const PROCESSOR_BUFFER_SIZE = 4096
+const ERROR_DISPLAY_MS = 3000
 const AUDIO_CHUNK_TYPE = 'input:audio:chunk'
 const AUDIO_END_TYPE = 'input:audio:end'
 const LISTEN_STATE_EVENT = 'vad:listen-state'
@@ -202,9 +203,34 @@ export function useRealtimeVoiceInput() {
   let sourceNode: MediaStreamAudioSourceNode | null = null
   let processorNode: ScriptProcessorNode | null = null
   let muteGainNode: GainNode | null = null
+  let errorTimer: number | null = null
 
   const canStart = computed(() => asrStore.moduleEnabled && wsStore.connected)
   const isSpeaking = computed(() => isListening.value && (isSpeech.value || SPEAKING_STATES.has(listenState.value)))
+
+  function clearErrorTimer() {
+    if (errorTimer !== null) {
+      window.clearTimeout(errorTimer)
+      errorTimer = null
+    }
+  }
+
+  function setError(message: string | null) {
+    clearErrorTimer()
+    error.value = message
+
+    if (!message) {
+      return
+    }
+
+    // VAD 错误只短暂展示；新错误会覆盖旧错误并重新计时。
+    errorTimer = window.setTimeout(() => {
+      if (error.value === message) {
+        error.value = null
+      }
+      errorTimer = null
+    }, ERROR_DISPLAY_MS)
+  }
 
   function resetListenState() {
     listenState.value = 'silence'
@@ -232,7 +258,7 @@ export function useRealtimeVoiceInput() {
     energy.value = listenStateData.energy ?? null
 
     if (listenState.value === 'error') {
-      error.value = listenStateData.message || listenStateData.reason || listenStateData.code || 'Realtime VAD processing failed'
+      setError(listenStateData.message || listenStateData.reason || listenStateData.code || 'VAD processing failed')
     }
   }
 
@@ -270,7 +296,7 @@ export function useRealtimeVoiceInput() {
     const notifyBackend = options.notifyBackend ?? true
 
     if (options.errorMessage) {
-      error.value = options.errorMessage
+      setError(options.errorMessage)
     }
 
     cleanupAudioGraph()
@@ -316,31 +342,31 @@ export function useRealtimeVoiceInput() {
       return true
     }
 
-    error.value = null
+    setError(null)
 
     if (!session.chatId || !session.characterId) {
-      error.value = 'Realtime voice input requires an active chat and character'
+      setError('Realtime voice input requires an active chat and character')
       return false
     }
 
     if (!asrStore.moduleEnabled) {
-      error.value = 'ASR module is disabled'
+      setError('ASR module is disabled')
       return false
     }
 
     if (!wsStore.connected) {
-      error.value = 'WebSocket is not connected'
+      setError('WebSocket is not connected')
       return false
     }
 
     if (!navigator.mediaDevices?.getUserMedia) {
-      error.value = 'Media input is not available in this browser'
+      setError('Media input is not available in this browser')
       return false
     }
 
     const AudioContextConstructor = getAudioContextConstructor()
     if (!AudioContextConstructor) {
-      error.value = 'AudioContext is not available in this browser'
+      setError('AudioContext is not available in this browser')
       return false
     }
 
@@ -377,7 +403,7 @@ export function useRealtimeVoiceInput() {
       isStarting.value = false
       return true
     } catch (err) {
-      error.value = errorMessage(err)
+      setError(errorMessage(err))
       cleanupAudioGraph()
       return false
     }
@@ -405,6 +431,7 @@ export function useRealtimeVoiceInput() {
   )
 
   onUnmounted(() => {
+    clearErrorTimer()
     detachListenStateListener()
     void stop()
   })
