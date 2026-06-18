@@ -114,6 +114,9 @@ export class WebSocketManager {
       case 'output:chat:complete':
         this.emit('chat:complete', message.data)
         break
+      case 'output:chat:interrupted':
+        this.emit('chat:interrupted', message.data)
+        break
       case 'output:asr:transcript':
         this.emit('asr:transcript', message.data)
         break

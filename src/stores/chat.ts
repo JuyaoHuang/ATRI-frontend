@@ -119,7 +119,8 @@ export const useChatStore = defineStore('chat', {
         chat_id: payload.chatId,
         role: 'human',
         content,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        generation_id: payload.generationId
       })
       this.streamingText = ''
       this.isStreaming = true
@@ -129,7 +130,7 @@ export const useChatStore = defineStore('chat', {
       this.streamingText += chunk
     },
 
-    completeStreaming(fullReply: string, name?: string, avatar?: string) {
+    completeStreaming(fullReply: string, name?: string, avatar?: string, generationId?: string) {
       if (this.currentChatId && this.currentCharacterId) {
         this.messages.push({
           id: `msg_${Date.now()}`,
@@ -138,7 +139,43 @@ export const useChatStore = defineStore('chat', {
           content: fullReply,
           timestamp: new Date().toISOString(),
           name,
-          avatar
+          avatar,
+          generation_id: generationId
+        })
+      }
+      this.streamingText = ''
+      this.isStreaming = false
+    },
+
+    interruptStreaming(payload: {
+      chatId: string
+      characterId?: string
+      partialReply?: string
+      generationId?: string
+      interruptReason?: string
+      name?: string
+      avatar?: string
+    }) {
+      if (this.currentChatId !== payload.chatId) {
+        return
+      }
+      if (payload.characterId && this.currentCharacterId !== payload.characterId) {
+        return
+      }
+
+      const content = (payload.partialReply || '').trim()
+      if (content) {
+        this.messages.push({
+          id: `interrupted_${payload.generationId || Date.now()}`,
+          chat_id: payload.chatId,
+          role: 'ai',
+          content,
+          timestamp: new Date().toISOString(),
+          name: payload.name,
+          avatar: payload.avatar,
+          generation_id: payload.generationId,
+          interrupted: true,
+          interrupt_reason: payload.interruptReason
         })
       }
       this.streamingText = ''

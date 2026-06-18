@@ -210,6 +210,9 @@ export interface MessageResponse {
   role: 'human' | 'ai'
   content: string
   timestamp: string
+  generation_id?: string
+  interrupted?: boolean
+  interrupt_reason?: string
   name?: string      // AI 消息的角色名称或 character_id
 }
 

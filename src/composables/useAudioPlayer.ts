@@ -8,11 +8,13 @@ interface QueueItem {
   text: string
   url: string
   source: 'auto' | 'manual' | 'test'
+  generationId?: string
 }
 
 interface EnqueueOptions {
   source?: QueueItem['source']
   voiceId?: string
+  generationId?: string
 }
 
 const queue = ref<QueueItem[]>([])
@@ -22,6 +24,8 @@ const currentTime = ref(0)
 const duration = ref(0)
 const error = ref<string | null>(null)
 let audio: HTMLAudioElement | null = null
+const invalidatedGenerationIds = new Set<string>()
+const activeSynthesisGenerationIds = new Set<string>()
 
 function finiteTime(value: number) {
   return Number.isFinite(value) && value > 0 ? value : 0
@@ -70,6 +74,23 @@ function revokeItem(item: QueueItem | null) {
   }
 }
 
+function isGenerationInvalidated(generationId?: string) {
+  return Boolean(generationId && invalidatedGenerationIds.has(generationId))
+}
+
+function cleanupInvalidatedGeneration(generationId?: string) {
+  if (!generationId || activeSynthesisGenerationIds.has(generationId)) {
+    return
+  }
+  if (current.value?.generationId === generationId) {
+    return
+  }
+  if (queue.value.some(item => item.generationId === generationId)) {
+    return
+  }
+  invalidatedGenerationIds.delete(generationId)
+}
+
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value)
 }
@@ -81,6 +102,12 @@ async function playNext() {
 
   const item = queue.value.shift()
   if (!item) {
+    return
+  }
+  if (isGenerationInvalidated(item.generationId)) {
+    revokeItem(item)
+    cleanupInvalidatedGeneration(item.generationId)
+    void playNext()
     return
   }
 
@@ -125,6 +152,11 @@ export function useAudioPlayer() {
     }
 
     const source = options.source || 'manual'
+    const generationId = options.generationId
+    if (isGenerationInvalidated(generationId)) {
+      return
+    }
+
     const synthesisText = source === 'test'
       ? normalizedText
       : cleanAiReplyTextForTts(normalizedText)
@@ -136,15 +168,33 @@ export function useAudioPlayer() {
     error.value = null
     await ttsStore.ensureLoaded()
 
-    const blob = await ttsStore.synthesize({
-      text: synthesisText,
-      provider: ttsStore.config.tts_model,
-      voice_id: options.voiceId
-    })
+    if (generationId) {
+      activeSynthesisGenerationIds.add(generationId)
+    }
+
+    let blob: Blob
+    try {
+      blob = await ttsStore.synthesize({
+        text: synthesisText,
+        provider: ttsStore.config.tts_model,
+        voice_id: options.voiceId
+      })
+    } finally {
+      if (generationId) {
+        activeSynthesisGenerationIds.delete(generationId)
+      }
+    }
+
+    if (isGenerationInvalidated(generationId)) {
+      cleanupInvalidatedGeneration(generationId)
+      return
+    }
+
     const item: QueueItem = {
       id: `tts_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       text: normalizedText,
       source,
+      generationId,
       url: URL.createObjectURL(blob)
     }
     queue.value.push(item)
@@ -173,6 +223,16 @@ export function useAudioPlayer() {
   }
 
   function stop() {
+    const stoppedGenerationIds = new Set<string>()
+    if (current.value?.generationId) {
+      stoppedGenerationIds.add(current.value.generationId)
+    }
+    queue.value.forEach(item => {
+      if (item.generationId) {
+        stoppedGenerationIds.add(item.generationId)
+      }
+    })
+
     if (audio) {
       audio.pause()
       audio.removeAttribute('src')
@@ -184,6 +244,36 @@ export function useAudioPlayer() {
     queue.value = []
     isPlaying.value = false
     resetPlaybackPosition()
+    stoppedGenerationIds.forEach(generationId => cleanupInvalidatedGeneration(generationId))
+  }
+
+  function invalidateGeneration(generationId: string) {
+    invalidatedGenerationIds.add(generationId)
+    queue.value = queue.value.filter(item => {
+      if (item.generationId !== generationId) {
+        return true
+      }
+      revokeItem(item)
+      return false
+    })
+    if (current.value?.generationId === generationId) {
+      stop()
+    }
+    cleanupInvalidatedGeneration(generationId)
+  }
+
+  function invalidateActiveGeneration() {
+    const generationIds = new Set<string>()
+    if (current.value?.generationId) {
+      generationIds.add(current.value.generationId)
+    }
+    queue.value.forEach(item => {
+      if (item.generationId) {
+        generationIds.add(item.generationId)
+      }
+    })
+    activeSynthesisGenerationIds.forEach(generationId => generationIds.add(generationId))
+    generationIds.forEach(generationId => invalidatedGenerationIds.add(generationId))
   }
 
   function seek(time: number) {
@@ -213,6 +303,8 @@ export function useAudioPlayer() {
     pause,
     resume,
     stop,
+    invalidateGeneration,
+    invalidateActiveGeneration,
     seek
   }
 }

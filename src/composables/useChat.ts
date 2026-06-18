@@ -151,7 +151,10 @@ export function useChat() {
           content,
           timestamp: msg.timestamp,
           name: msg.name,
-          avatar
+          avatar,
+          generation_id: msg.generation_id,
+          interrupted: msg.interrupted,
+          interrupt_reason: msg.interrupt_reason
         }
       })
 

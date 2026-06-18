@@ -16,6 +16,28 @@ interface AsrTranscriptData {
   is_final?: boolean
 }
 
+interface ChatCompleteData {
+  full_reply?: string
+  character_id?: string
+  chat_id?: string
+  generation_id?: string
+}
+
+interface ChatInterruptedData {
+  partial_reply?: string
+  character_id?: string
+  chat_id?: string
+  generation_id?: string
+  reason?: string
+}
+
+interface InterruptData {
+  chat_id?: string
+  character_id?: string
+  generation_id?: string
+  reason?: string
+}
+
 export function useWebSocket() {
   const wsStore = useWebSocketStore()
   const chatStore = useChatStore()
@@ -24,12 +46,12 @@ export function useWebSocket() {
   const ttsStore = useTTSStore()
   const audioPlayer = useAudioPlayer()
 
-  const enqueueAutoSpeech = async (text: string) => {
+  const enqueueAutoSpeech = async (text: string, generationId?: string) => {
     await ttsStore.ensureLoaded()
     if (!ttsStore.moduleEnabled || !ttsStore.autoPlayEnabled || !text.trim()) {
       return
     }
-    await audioPlayer.enqueueText(text, { source: 'auto' })
+    await audioPlayer.enqueueText(text, { source: 'auto', generationId })
   }
 
   const connect = () => {
@@ -60,7 +82,7 @@ export function useWebSocket() {
     })
 
     wsManager.on('chat:complete', (data: unknown) => {
-      const completeData = data as { full_reply?: string; character_id?: string; chat_id?: string }
+      const completeData = data as ChatCompleteData
       const parsed = extractLive2dExpression(completeData.full_reply || '')
 
       // 获取角色信息
@@ -78,12 +100,49 @@ export function useWebSocket() {
         live2dStore.requestExpression(parsed.expression)
       }
 
-      chatStore.completeStreaming(parsed.content || '', characterName, characterAvatar)
-      void enqueueAutoSpeech(parsed.content || '')
+      chatStore.completeStreaming(
+        parsed.content || '',
+        characterName,
+        characterAvatar,
+        completeData.generation_id
+      )
+      void enqueueAutoSpeech(parsed.content || '', completeData.generation_id)
 
       if (completeData.chat_id) {
         chatStore.consumePendingDeferredTitle(completeData.chat_id)
       }
+    })
+
+    wsManager.on('chat:interrupted', (data: unknown) => {
+      const interruptedData = data as ChatInterruptedData
+      if (interruptedData.generation_id) {
+        audioPlayer.invalidateGeneration(interruptedData.generation_id)
+      }
+
+      const parsed = extractLive2dExpression(interruptedData.partial_reply || '')
+      let characterName: string | undefined
+      let characterAvatar: string | undefined
+      if (interruptedData.character_id) {
+        const character = charactersStore.characters.find((c) => c.id === interruptedData.character_id)
+        if (character) {
+          characterName = character.name
+          characterAvatar = character.avatarUrl || character.avatar
+        }
+      }
+
+      if (parsed.expression) {
+        live2dStore.requestExpression(parsed.expression)
+      }
+
+      chatStore.interruptStreaming({
+        chatId: interruptedData.chat_id || chatStore.currentChatId || '',
+        characterId: interruptedData.character_id,
+        partialReply: parsed.content || '',
+        generationId: interruptedData.generation_id,
+        interruptReason: interruptedData.reason,
+        name: characterName,
+        avatar: characterAvatar
+      })
     })
 
     wsManager.on('chat:error', (data: unknown) => {
@@ -106,8 +165,19 @@ export function useWebSocket() {
       })
     })
 
-    wsManager.on('vad:interrupt', () => {
+    wsManager.on('vad:interrupt', (data: unknown) => {
+      const interruptData = data as InterruptData | undefined
+      if (interruptData?.generation_id) {
+        audioPlayer.invalidateGeneration(interruptData.generation_id)
+      } else {
+        audioPlayer.invalidateActiveGeneration()
+      }
       audioPlayer.stop()
+      chatStore.interruptStreaming({
+        chatId: interruptData?.chat_id || chatStore.currentChatId || '',
+        characterId: interruptData?.character_id,
+        interruptReason: interruptData?.reason
+      })
     })
 
     wsManager.connect()

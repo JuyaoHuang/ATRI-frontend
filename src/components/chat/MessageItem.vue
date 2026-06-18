@@ -44,7 +44,10 @@ const canPlaySpeech = computed(() => {
 })
 
 function playMessageSpeech() {
-  void audioPlayer.enqueueText(props.message.content, { source: 'manual' })
+  void audioPlayer.enqueueText(props.message.content, {
+    source: 'manual',
+    generationId: props.message.generation_id
+  })
 }
 </script>
 
@@ -87,6 +90,7 @@ function playMessageSpeech() {
     <div class="message-content">
       <div class="message-header">
         <span class="message-role">{{ displayName }}</span>
+        <span v-if="message.interrupted" class="message-status">Interrupted</span>
         <div class="message-tools">
           <button
             v-if="canPlaySpeech"
@@ -236,7 +240,6 @@ function playMessageSpeech() {
 .message-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   margin-bottom: 8px;
 }
@@ -246,6 +249,16 @@ function playMessageSpeech() {
   font-size: 0.875rem;
   font-weight: 400;
   color: rgb(0 0 0 / 0.6);
+}
+
+.message-status {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 2px 7px;
+  background: rgb(245 158 11 / 0.14);
+  color: #a15c00;
+  font-size: 11px;
+  line-height: 1.3;
 }
 
 .message-time {
@@ -258,6 +271,7 @@ function playMessageSpeech() {
   align-items: center;
   gap: 0.4rem;
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .message-speech-button {
