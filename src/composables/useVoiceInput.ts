@@ -2,6 +2,7 @@ import { computed, onUnmounted, ref } from 'vue'
 
 import { asrApi } from '@/api/asr'
 import { useASRStore } from '@/stores/asr'
+import { createWavRecorder } from '@/utils/audioRecording'
 
 type SpeechRecognitionConstructor = new () => SpeechRecognition
 
@@ -70,9 +71,8 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
   const elapsedMs = ref(0)
 
   let recognition: SpeechRecognition | undefined
-  let mediaRecorder: MediaRecorder | undefined
+  let wavRecorder: Awaited<ReturnType<typeof createWavRecorder>> | undefined
   let mediaStream: MediaStream | undefined
-  let chunks: Blob[] = []
   let timer: ReturnType<typeof setInterval> | undefined
 
   const activeProvider = computed(() => asrStore.activeProvider)
@@ -118,8 +118,8 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
       return
     }
 
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop()
+    if (wavRecorder) {
+      void stopBackendRecording()
     }
   }
 
@@ -186,7 +186,7 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
 
   async function startBackendRecording() {
     if (!navigator.mediaDevices?.getUserMedia) {
-      error.value = 'MediaRecorder is not available in this browser'
+      error.value = 'Audio recording is not available in this browser'
       return
     }
 
@@ -198,18 +198,7 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
 
     try {
       mediaStream = await navigator.mediaDevices.getUserMedia(constraints)
-      chunks = []
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
-      mediaRecorder = new MediaRecorder(mediaStream, mimeType ? { mimeType } : undefined)
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          chunks.push(event.data)
-        }
-      }
-      mediaRecorder.onstop = () => {
-        void transcribeRecording()
-      }
-      mediaRecorder.start()
+      wavRecorder = await createWavRecorder(mediaStream)
       isRecording.value = true
       startTimer()
     } catch (err) {
@@ -218,14 +207,27 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
     }
   }
 
-  async function transcribeRecording() {
+  async function stopBackendRecording() {
+    if (!wavRecorder) {
+      return
+    }
+
     isRecording.value = false
     isTranscribing.value = true
     stopTimer()
 
     try {
-      const blob = new Blob(chunks, { type: mediaRecorder?.mimeType || 'audio/webm' })
-      const result = await asrApi.transcribe(blob, asrStore.config.asr_model)
+      const recording = await wavRecorder.stop()
+      const result = await asrApi.transcribe(
+        recording.blob,
+        asrStore.config.asr_model,
+        {
+          source: recording.contract.source,
+          sample_rate: recording.contract.sampleRate,
+          channels: recording.contract.channels,
+          encoding: recording.contract.encoding
+        }
+      )
       if (result.text.trim()) {
         options.onTranscript?.(result.text.trim())
       } else {
@@ -240,8 +242,7 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
   }
 
   function cleanupMedia() {
-    mediaRecorder = undefined
-    chunks = []
+    wavRecorder = undefined
     mediaStream?.getTracks().forEach(track => track.stop())
     mediaStream = undefined
     isRecording.value = false
@@ -249,6 +250,9 @@ export function useVoiceInput(options: VoiceInputOptions = {}) {
 
   onUnmounted(() => {
     recognition?.abort()
+    if (wavRecorder) {
+      void wavRecorder.cancel()
+    }
     cleanupMedia()
     stopTimer()
   })

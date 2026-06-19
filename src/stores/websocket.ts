@@ -17,8 +17,12 @@ export const useWebSocketStore = defineStore('websocket', {
   }),
 
   actions: {
-    send(message: unknown) {
-      this.wsManager?.send(message)
+    send(message: unknown): boolean {
+      return this.wsManager?.send(message) ?? false
+    },
+
+    sendIfOpen(message: unknown): boolean {
+      return this.wsManager?.sendIfOpen(message) ?? false
     }
   }
 })

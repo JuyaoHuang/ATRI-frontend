@@ -104,6 +104,13 @@ export interface ASRTranscriptionResponse {
   text: string
 }
 
+export interface ASRUploadMetadata {
+  source: string
+  sample_rate: number
+  channels: number
+  encoding: string
+}
+
 // TTS related
 export type TTSProviderConfig = Record<string, string | number | boolean | null | undefined>
 
@@ -203,6 +210,9 @@ export interface MessageResponse {
   role: 'human' | 'ai'
   content: string
   timestamp: string
+  generation_id?: string
+  interrupted?: boolean
+  interrupt_reason?: string
   name?: string      // AI 消息的角色名称或 character_id
 }
 

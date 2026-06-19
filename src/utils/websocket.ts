@@ -1,30 +1,53 @@
+type WebSocketListener = (data?: unknown) => void
+
 export class WebSocketManager {
   private ws: WebSocket | null = null
   private reconnectTimer: number | null = null
   private heartbeatTimer: number | null = null
-  private messageQueue: unknown[] = []
-  private listeners: Map<string, ((data?: unknown) => void)[]> = new Map()
-  private url: string
+  private listeners: Map<string, WebSocketListener[]> = new Map()
+  private shouldReconnect = true
+  private destroyed = false
+  private readonly url: string
 
   constructor(url: string) {
     this.url = url
   }
 
+  getUrl(): string {
+    return this.url
+  }
+
+  isOpenOrConnecting(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
+      || this.ws?.readyState === WebSocket.CONNECTING
+  }
+
+  isReconnectEnabled(): boolean {
+    return this.shouldReconnect && !this.destroyed
+  }
+
   connect(): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
+    if (this.destroyed || this.isOpenOrConnecting()) {
       return
     }
 
-    this.ws = new WebSocket(this.url)
+    this.shouldReconnect = true
+    const socket = new WebSocket(this.url)
+    this.ws = socket
 
-    this.ws.onopen = () => {
+    socket.onopen = () => {
+      if (this.ws !== socket || this.destroyed) {
+        return
+      }
       console.log('WebSocket connected')
       this.emit('connected')
       this.startHeartbeat()
-      this.flushMessageQueue()
     }
 
-    this.ws.onmessage = (event) => {
+    socket.onmessage = (event) => {
+      if (this.ws !== socket || this.destroyed) {
+        return
+      }
       try {
         const message = JSON.parse(event.data)
         this.emit('message', message)
@@ -34,50 +57,86 @@ export class WebSocketManager {
       }
     }
 
-    this.ws.onerror = (error) => {
+    socket.onerror = (error) => {
+      if (this.ws !== socket || this.destroyed) {
+        return
+      }
       console.error('WebSocket error:', error)
       this.emit('error', error)
     }
 
-    this.ws.onclose = () => {
+    socket.onclose = () => {
+      if (this.ws !== socket || this.destroyed) {
+        return
+      }
       console.log('WebSocket closed')
+      this.ws = null
       this.emit('disconnected')
       this.stopHeartbeat()
-      this.scheduleReconnect()
+      if (this.shouldReconnect) {
+        this.scheduleReconnect()
+      }
     }
   }
 
   disconnect(): void {
+    this.shouldReconnect = false
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer)
       this.reconnectTimer = null
     }
     this.stopHeartbeat()
     if (this.ws) {
-      this.ws.close()
+      const socket = this.ws
       this.ws = null
+      socket.close()
     }
   }
 
-  send(message: unknown): void {
-    if (this.ws?.readyState === WebSocket.OPEN) {
-      this.ws.send(JSON.stringify(message))
-    } else {
-      // 连接未就绪，加入队列
-      this.messageQueue.push(message)
-    }
+  destroy(): void {
+    this.destroyed = true
+    this.disconnect()
+    this.listeners.clear()
   }
 
-  on(event: string, callback: (data?: unknown) => void): void {
+  send(message: unknown): boolean {
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      return false
+    }
+
+    this.ws.send(JSON.stringify(message))
+    return true
+  }
+
+  sendIfOpen(message: unknown): boolean {
+    return this.send(message)
+  }
+
+  on(event: string, callback: WebSocketListener): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, [])
     }
     this.listeners.get(event)!.push(callback)
   }
 
+  off(event: string, callback: WebSocketListener): void {
+    const callbacks = this.listeners.get(event)
+    if (!callbacks) {
+      return
+    }
+
+    const nextCallbacks = callbacks.filter(item => item !== callback)
+    if (nextCallbacks.length === 0) {
+      this.listeners.delete(event)
+      return
+    }
+
+    this.listeners.set(event, nextCallbacks)
+  }
+
   private emit(event: string, data?: unknown): void {
     const callbacks = this.listeners.get(event) || []
-    callbacks.forEach((callback) => callback(data))
+    callbacks.forEach(callback => callback(data))
   }
 
   private handleMessage(message: { type: string; data?: unknown }): void {
@@ -88,11 +147,22 @@ export class WebSocketManager {
       case 'output:chat:complete':
         this.emit('chat:complete', message.data)
         break
+      case 'output:chat:interrupted':
+        this.emit('chat:interrupted', message.data)
+        break
+      case 'output:asr:transcript':
+        this.emit('asr:transcript', message.data)
+        break
+      case 'control:listen-state':
+        this.emit('vad:listen-state', message.data)
+        break
+      case 'control:interrupt':
+        this.emit('vad:interrupt', message.data)
+        break
       case 'error':
         this.emit('chat:error', message.data)
         break
       case 'pong':
-        // 心跳响应
         break
       default:
         console.warn('Unknown message type:', message.type)
@@ -100,9 +170,10 @@ export class WebSocketManager {
   }
 
   private startHeartbeat(): void {
+    this.stopHeartbeat()
     this.heartbeatTimer = window.setInterval(() => {
       this.send({ type: 'ping' })
-    }, 20000) // 20秒
+    }, 20000)
   }
 
   private stopHeartbeat(): void {
@@ -113,18 +184,17 @@ export class WebSocketManager {
   }
 
   private scheduleReconnect(): void {
-    if (this.reconnectTimer) return
-    this.reconnectTimer = window.setTimeout(() => {
-      console.log('Reconnecting...')
-      this.reconnectTimer = null
-      this.connect()
-    }, 3000) // 3秒后重连
-  }
-
-  private flushMessageQueue(): void {
-    while (this.messageQueue.length > 0) {
-      const message = this.messageQueue.shift()
-      this.send(message)
+    if (!this.shouldReconnect || this.destroyed || this.reconnectTimer) {
+      return
     }
+
+    this.reconnectTimer = window.setTimeout(() => {
+      this.reconnectTimer = null
+      if (!this.shouldReconnect || this.destroyed) {
+        return
+      }
+      console.log('Reconnecting...')
+      this.connect()
+    }, 3000)
   }
 }

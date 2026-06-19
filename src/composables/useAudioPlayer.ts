@@ -8,11 +8,14 @@ interface QueueItem {
   text: string
   url: string
   source: 'auto' | 'manual' | 'test'
+  generationId?: string
+  vadInterruptedAtWhenQueued?: number | null
 }
 
 interface EnqueueOptions {
   source?: QueueItem['source']
   voiceId?: string
+  generationId?: string
 }
 
 const queue = ref<QueueItem[]>([])
@@ -22,6 +25,13 @@ const currentTime = ref(0)
 const duration = ref(0)
 const error = ref<string | null>(null)
 let audio: HTMLAudioElement | null = null
+
+// Keep VAD-interrupted ids long enough to reject late TTS results.
+const VAD_INTERRUPTED_GENERATION_TTL_MS = 5 * 60 * 1000
+const MAX_VAD_INTERRUPTED_GENERATIONS = 100
+const vadInterruptedGenerationIds = new Map<string, number>()
+const activeSynthesisGenerationIds = new Set<string>()
+let vadInterruptEpoch = 0
 
 function finiteTime(value: number) {
   return Number.isFinite(value) && value > 0 ? value : 0
@@ -70,6 +80,66 @@ function revokeItem(item: QueueItem | null) {
   }
 }
 
+function pruneVadInterruptedGenerations(now = Date.now()) {
+  for (const [generationId, interruptedAt] of vadInterruptedGenerationIds) {
+    if (now - interruptedAt > VAD_INTERRUPTED_GENERATION_TTL_MS) {
+      vadInterruptedGenerationIds.delete(generationId)
+    }
+  }
+
+  const overflow = vadInterruptedGenerationIds.size - MAX_VAD_INTERRUPTED_GENERATIONS
+  if (overflow <= 0) {
+    return
+  }
+
+  Array.from(vadInterruptedGenerationIds.keys())
+    .slice(0, overflow)
+    .forEach(generationId => vadInterruptedGenerationIds.delete(generationId))
+}
+
+function markVadGenerationInterrupted(generationId: string) {
+  pruneVadInterruptedGenerations()
+  if (vadInterruptedGenerationIds.has(generationId)) {
+    vadInterruptedGenerationIds.delete(generationId)
+  }
+  vadInterruptedGenerationIds.set(generationId, Date.now())
+}
+
+function bumpVadInterruptEpoch() {
+  vadInterruptEpoch += 1
+}
+
+function getVadGenerationInterruptedAt(generationId?: string) {
+  if (!generationId) {
+    return null
+  }
+  pruneVadInterruptedGenerations()
+  return vadInterruptedGenerationIds.get(generationId) ?? null
+}
+
+function shouldSkipInterruptedQueueItem(item: QueueItem) {
+  const interruptedAt = getVadGenerationInterruptedAt(item.generationId)
+  if (item.source !== 'manual') {
+    return interruptedAt !== null
+  }
+
+  return interruptedAt !== null && interruptedAt !== item.vadInterruptedAtWhenQueued
+}
+
+function markCurrentVadGenerationsInterrupted() {
+  const generationIds = new Set<string>()
+  if (current.value?.generationId) {
+    generationIds.add(current.value.generationId)
+  }
+  queue.value.forEach(item => {
+    if (item.generationId) {
+      generationIds.add(item.generationId)
+    }
+  })
+  activeSynthesisGenerationIds.forEach(generationId => generationIds.add(generationId))
+  generationIds.forEach(markVadGenerationInterrupted)
+}
+
 function errorMessage(value: unknown): string {
   return value instanceof Error ? value.message : String(value)
 }
@@ -81,6 +151,11 @@ async function playNext() {
 
   const item = queue.value.shift()
   if (!item) {
+    return
+  }
+  if (shouldSkipInterruptedQueueItem(item)) {
+    revokeItem(item)
+    void playNext()
     return
   }
 
@@ -125,6 +200,13 @@ export function useAudioPlayer() {
     }
 
     const source = options.source || 'manual'
+    const generationId = options.generationId
+    const vadInterruptEpochBeforeSynthesis = vadInterruptEpoch
+    const vadInterruptedAtBeforeSynthesis = getVadGenerationInterruptedAt(generationId)
+    if (source === 'auto' && vadInterruptedAtBeforeSynthesis !== null) {
+      return
+    }
+
     const synthesisText = source === 'test'
       ? normalizedText
       : cleanAiReplyTextForTts(normalizedText)
@@ -136,15 +218,44 @@ export function useAudioPlayer() {
     error.value = null
     await ttsStore.ensureLoaded()
 
-    const blob = await ttsStore.synthesize({
-      text: synthesisText,
-      provider: ttsStore.config.tts_model,
-      voice_id: options.voiceId
-    })
+    if (generationId) {
+      activeSynthesisGenerationIds.add(generationId)
+    }
+
+    let blob: Blob
+    try {
+      blob = await ttsStore.synthesize({
+        text: synthesisText,
+        provider: ttsStore.config.tts_model,
+        voice_id: options.voiceId
+      })
+    } finally {
+      if (generationId) {
+        activeSynthesisGenerationIds.delete(generationId)
+      }
+    }
+
+    const vadInterruptedAtAfterSynthesis = getVadGenerationInterruptedAt(generationId)
+    if (source === 'manual' && vadInterruptEpoch !== vadInterruptEpochBeforeSynthesis) {
+      return
+    }
+    if (source === 'auto' && vadInterruptedAtAfterSynthesis !== null) {
+      return
+    }
+    if (
+      source === 'manual'
+      && vadInterruptedAtAfterSynthesis !== null
+      && vadInterruptedAtAfterSynthesis !== vadInterruptedAtBeforeSynthesis
+    ) {
+      return
+    }
+
     const item: QueueItem = {
       id: `tts_${Date.now()}_${Math.random().toString(36).slice(2)}`,
       text: normalizedText,
       source,
+      generationId,
+      vadInterruptedAtWhenQueued: source === 'manual' ? vadInterruptedAtAfterSynthesis : undefined,
       url: URL.createObjectURL(blob)
     }
     queue.value.push(item)
@@ -186,6 +297,34 @@ export function useAudioPlayer() {
     resetPlaybackPosition()
   }
 
+  function vadInterruptGeneration(generationId: string) {
+    markVadGenerationInterrupted(generationId)
+    queue.value = queue.value.filter(item => {
+      if (item.generationId !== generationId) {
+        return true
+      }
+      revokeItem(item)
+      return false
+    })
+    if (current.value?.generationId === generationId) {
+      stop()
+    }
+  }
+
+  function vadInterruptActiveGeneration() {
+    markCurrentVadGenerationsInterrupted()
+  }
+
+  function vadInterruptPlayback(generationId?: string) {
+    bumpVadInterruptEpoch()
+    if (generationId) {
+      vadInterruptGeneration(generationId)
+    } else {
+      vadInterruptActiveGeneration()
+    }
+    stop()
+  }
+
   function seek(time: number) {
     if (!audio || !current.value) {
       return
@@ -213,6 +352,9 @@ export function useAudioPlayer() {
     pause,
     resume,
     stop,
+    vadInterruptGeneration,
+    vadInterruptActiveGeneration,
+    vadInterruptPlayback,
     seek
   }
 }

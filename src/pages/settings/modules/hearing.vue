@@ -17,6 +17,7 @@ import { asrApi } from '@/api/asr'
 import type { ASRProviderConfig } from '@/api/types'
 import { useAudioLevel } from '@/composables/useAudioLevel'
 import { useASRStore } from '@/stores/asr'
+import { createWavRecorder } from '@/utils/audioRecording'
 
 type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition
 
@@ -71,8 +72,7 @@ const streamingText = ref('')
 const statusMessage = ref('')
 const testError = ref('')
 const mediaStream = ref<MediaStream | null>(null)
-const mediaRecorder = ref<MediaRecorder | null>(null)
-const chunks = ref<Blob[]>([])
+let wavRecorder: Awaited<ReturnType<typeof createWavRecorder>> | undefined
 let stopWebSpeechTest: (() => void) | undefined
 
 const activeProviderName = computed({
@@ -267,36 +267,38 @@ function startWebSpeechTest() {
 
 async function startBackendTest() {
   const stream = await requestAudioStream()
-  chunks.value = []
-  const mimeType = MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : ''
-  const recorder = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
-  mediaRecorder.value = recorder
-  recorder.ondataavailable = (event) => {
-    if (event.data.size > 0) {
-      chunks.value.push(event.data)
-    }
-  }
-  recorder.onstop = () => {
-    void transcribeBackendRecording()
-  }
-  recorder.start()
+  wavRecorder = await createWavRecorder(stream)
   isTesting.value = true
   isTranscribing.value = false
   statusMessage.value = 'Recording audio for transcription...'
 }
 
 async function transcribeBackendRecording() {
+  if (!wavRecorder) {
+    return
+  }
+
   isTranscribing.value = true
   statusMessage.value = 'Processing transcription...'
   try {
-    const blob = new Blob(chunks.value, { type: mediaRecorder.value?.mimeType || 'audio/webm' })
-    const result = await asrApi.transcribe(blob, activeProviderName.value)
+    const recording = await wavRecorder.stop()
+    const result = await asrApi.transcribe(
+      recording.blob,
+      activeProviderName.value,
+      {
+        source: recording.contract.source,
+        sample_rate: recording.contract.sampleRate,
+        channels: recording.contract.channels,
+        encoding: recording.contract.encoding
+      }
+    )
     testText.value = result.text
     statusMessage.value = result.text ? 'Transcription complete!' : 'No transcription returned'
   } catch (error) {
     testError.value = error instanceof Error ? error.message : String(error)
     statusMessage.value = 'Transcription failed'
   } finally {
+    wavRecorder = undefined
     isTranscribing.value = false
     isTesting.value = false
     mediaStream.value?.getTracks().forEach(track => track.stop())
@@ -339,8 +341,9 @@ async function stopSTTTest() {
     if (stopWebSpeechTest) {
       stopWebSpeechTest()
       stopWebSpeechTest = undefined
-    } else if (mediaRecorder.value && mediaRecorder.value.state !== 'inactive') {
-      mediaRecorder.value.stop()
+    } else if (wavRecorder) {
+      await transcribeBackendRecording()
+      return
     }
   } catch {
     // Stopping may race with recorder or browser speech end events.
@@ -376,6 +379,10 @@ onMounted(async () => {
 
 onUnmounted(() => {
   void stopAudioMonitoring()
+  if (wavRecorder) {
+    void wavRecorder.cancel()
+    wavRecorder = undefined
+  }
   void stopSTTTest()
 })
 </script>

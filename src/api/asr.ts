@@ -4,6 +4,7 @@ import type {
   ASRConfigResponse,
   ASRHealthResponse,
   ASRProviderStatus,
+  ASRUploadMetadata,
   ASRTranscriptionResponse
 } from './types'
 
@@ -33,14 +34,20 @@ export const asrApi = {
     return data
   },
 
-  async transcribe(recording: Blob, provider?: string): Promise<ASRTranscriptionResponse> {
+  async transcribe(
+    recording: Blob,
+    provider?: string,
+    metadata?: ASRUploadMetadata
+  ): Promise<ASRTranscriptionResponse> {
     const formData = new FormData()
-    const extension = recording.type.includes('webm')
-      ? 'webm'
-      : recording.type.includes('ogg')
-        ? 'ogg'
-        : 'wav'
-    formData.append('audio', recording, `recording.${extension}`)
+    formData.append('audio', recording, 'recording.wav')
+
+    if (metadata) {
+      formData.append('source', metadata.source)
+      formData.append('sample_rate', String(metadata.sample_rate))
+      formData.append('channels', String(metadata.channels))
+      formData.append('encoding', metadata.encoding)
+    }
 
     const { data } = await client.post<ASRTranscriptionResponse>('/api/asr/transcribe', formData, {
       headers: {
