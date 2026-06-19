@@ -24,7 +24,11 @@ const currentTime = ref(0)
 const duration = ref(0)
 const error = ref<string | null>(null)
 let audio: HTMLAudioElement | null = null
-const invalidatedGenerationIds = new Set<string>()
+
+// Keep VAD-interrupted ids long enough to reject late TTS results.
+const VAD_INTERRUPTED_GENERATION_TTL_MS = 5 * 60 * 1000
+const MAX_VAD_INTERRUPTED_GENERATIONS = 100
+const vadInterruptedGenerationIds = new Map<string, number>()
 const activeSynthesisGenerationIds = new Set<string>()
 
 function finiteTime(value: number) {
@@ -74,21 +78,51 @@ function revokeItem(item: QueueItem | null) {
   }
 }
 
-function isGenerationInvalidated(generationId?: string) {
-  return Boolean(generationId && invalidatedGenerationIds.has(generationId))
+function pruneVadInterruptedGenerations(now = Date.now()) {
+  for (const [generationId, interruptedAt] of vadInterruptedGenerationIds) {
+    if (now - interruptedAt > VAD_INTERRUPTED_GENERATION_TTL_MS) {
+      vadInterruptedGenerationIds.delete(generationId)
+    }
+  }
+
+  const overflow = vadInterruptedGenerationIds.size - MAX_VAD_INTERRUPTED_GENERATIONS
+  if (overflow <= 0) {
+    return
+  }
+
+  Array.from(vadInterruptedGenerationIds.keys())
+    .slice(0, overflow)
+    .forEach(generationId => vadInterruptedGenerationIds.delete(generationId))
 }
 
-function cleanupInvalidatedGeneration(generationId?: string) {
-  if (!generationId || activeSynthesisGenerationIds.has(generationId)) {
-    return
+function markVadGenerationInterrupted(generationId: string) {
+  pruneVadInterruptedGenerations()
+  if (vadInterruptedGenerationIds.has(generationId)) {
+    vadInterruptedGenerationIds.delete(generationId)
   }
-  if (current.value?.generationId === generationId) {
-    return
+  vadInterruptedGenerationIds.set(generationId, Date.now())
+}
+
+function isVadGenerationInterrupted(generationId?: string) {
+  if (!generationId) {
+    return false
   }
-  if (queue.value.some(item => item.generationId === generationId)) {
-    return
+  pruneVadInterruptedGenerations()
+  return vadInterruptedGenerationIds.has(generationId)
+}
+
+function markCurrentVadGenerationsInterrupted() {
+  const generationIds = new Set<string>()
+  if (current.value?.generationId) {
+    generationIds.add(current.value.generationId)
   }
-  invalidatedGenerationIds.delete(generationId)
+  queue.value.forEach(item => {
+    if (item.generationId) {
+      generationIds.add(item.generationId)
+    }
+  })
+  activeSynthesisGenerationIds.forEach(generationId => generationIds.add(generationId))
+  generationIds.forEach(markVadGenerationInterrupted)
 }
 
 function errorMessage(value: unknown): string {
@@ -104,9 +138,8 @@ async function playNext() {
   if (!item) {
     return
   }
-  if (isGenerationInvalidated(item.generationId)) {
+  if (isVadGenerationInterrupted(item.generationId)) {
     revokeItem(item)
-    cleanupInvalidatedGeneration(item.generationId)
     void playNext()
     return
   }
@@ -153,7 +186,7 @@ export function useAudioPlayer() {
 
     const source = options.source || 'manual'
     const generationId = options.generationId
-    if (isGenerationInvalidated(generationId)) {
+    if (isVadGenerationInterrupted(generationId)) {
       return
     }
 
@@ -185,8 +218,7 @@ export function useAudioPlayer() {
       }
     }
 
-    if (isGenerationInvalidated(generationId)) {
-      cleanupInvalidatedGeneration(generationId)
+    if (isVadGenerationInterrupted(generationId)) {
       return
     }
 
@@ -223,16 +255,6 @@ export function useAudioPlayer() {
   }
 
   function stop() {
-    const stoppedGenerationIds = new Set<string>()
-    if (current.value?.generationId) {
-      stoppedGenerationIds.add(current.value.generationId)
-    }
-    queue.value.forEach(item => {
-      if (item.generationId) {
-        stoppedGenerationIds.add(item.generationId)
-      }
-    })
-
     if (audio) {
       audio.pause()
       audio.removeAttribute('src')
@@ -244,11 +266,10 @@ export function useAudioPlayer() {
     queue.value = []
     isPlaying.value = false
     resetPlaybackPosition()
-    stoppedGenerationIds.forEach(generationId => cleanupInvalidatedGeneration(generationId))
   }
 
-  function invalidateGeneration(generationId: string) {
-    invalidatedGenerationIds.add(generationId)
+  function vadInterruptGeneration(generationId: string) {
+    markVadGenerationInterrupted(generationId)
     queue.value = queue.value.filter(item => {
       if (item.generationId !== generationId) {
         return true
@@ -259,21 +280,10 @@ export function useAudioPlayer() {
     if (current.value?.generationId === generationId) {
       stop()
     }
-    cleanupInvalidatedGeneration(generationId)
   }
 
-  function invalidateActiveGeneration() {
-    const generationIds = new Set<string>()
-    if (current.value?.generationId) {
-      generationIds.add(current.value.generationId)
-    }
-    queue.value.forEach(item => {
-      if (item.generationId) {
-        generationIds.add(item.generationId)
-      }
-    })
-    activeSynthesisGenerationIds.forEach(generationId => generationIds.add(generationId))
-    generationIds.forEach(generationId => invalidatedGenerationIds.add(generationId))
+  function vadInterruptActiveGeneration() {
+    markCurrentVadGenerationsInterrupted()
   }
 
   function seek(time: number) {
@@ -303,8 +313,8 @@ export function useAudioPlayer() {
     pause,
     resume,
     stop,
-    invalidateGeneration,
-    invalidateActiveGeneration,
+    vadInterruptGeneration,
+    vadInterruptActiveGeneration,
     seek
   }
 }

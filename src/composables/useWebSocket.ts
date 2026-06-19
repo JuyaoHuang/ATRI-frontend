@@ -116,7 +116,7 @@ export function useWebSocket() {
     wsManager.on('chat:interrupted', (data: unknown) => {
       const interruptedData = data as ChatInterruptedData
       if (interruptedData.generation_id) {
-        audioPlayer.invalidateGeneration(interruptedData.generation_id)
+        audioPlayer.vadInterruptGeneration(interruptedData.generation_id)
       }
 
       const parsed = extractLive2dExpression(interruptedData.partial_reply || '')
@@ -168,9 +168,9 @@ export function useWebSocket() {
     wsManager.on('vad:interrupt', (data: unknown) => {
       const interruptData = data as InterruptData | undefined
       if (interruptData?.generation_id) {
-        audioPlayer.invalidateGeneration(interruptData.generation_id)
+        audioPlayer.vadInterruptGeneration(interruptData.generation_id)
       } else {
-        audioPlayer.invalidateActiveGeneration()
+        audioPlayer.vadInterruptActiveGeneration()
       }
       audioPlayer.stop()
       chatStore.interruptStreaming({
