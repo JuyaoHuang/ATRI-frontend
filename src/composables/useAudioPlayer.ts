@@ -31,6 +31,7 @@ const VAD_INTERRUPTED_GENERATION_TTL_MS = 5 * 60 * 1000
 const MAX_VAD_INTERRUPTED_GENERATIONS = 100
 const vadInterruptedGenerationIds = new Map<string, number>()
 const activeSynthesisGenerationIds = new Set<string>()
+let vadInterruptEpoch = 0
 
 function finiteTime(value: number) {
   return Number.isFinite(value) && value > 0 ? value : 0
@@ -102,6 +103,10 @@ function markVadGenerationInterrupted(generationId: string) {
     vadInterruptedGenerationIds.delete(generationId)
   }
   vadInterruptedGenerationIds.set(generationId, Date.now())
+}
+
+function bumpVadInterruptEpoch() {
+  vadInterruptEpoch += 1
 }
 
 function getVadGenerationInterruptedAt(generationId?: string) {
@@ -196,6 +201,7 @@ export function useAudioPlayer() {
 
     const source = options.source || 'manual'
     const generationId = options.generationId
+    const vadInterruptEpochBeforeSynthesis = vadInterruptEpoch
     const vadInterruptedAtBeforeSynthesis = getVadGenerationInterruptedAt(generationId)
     if (source === 'auto' && vadInterruptedAtBeforeSynthesis !== null) {
       return
@@ -230,6 +236,9 @@ export function useAudioPlayer() {
     }
 
     const vadInterruptedAtAfterSynthesis = getVadGenerationInterruptedAt(generationId)
+    if (source === 'manual' && vadInterruptEpoch !== vadInterruptEpochBeforeSynthesis) {
+      return
+    }
     if (source === 'auto' && vadInterruptedAtAfterSynthesis !== null) {
       return
     }
@@ -306,6 +315,16 @@ export function useAudioPlayer() {
     markCurrentVadGenerationsInterrupted()
   }
 
+  function vadInterruptPlayback(generationId?: string) {
+    bumpVadInterruptEpoch()
+    if (generationId) {
+      vadInterruptGeneration(generationId)
+    } else {
+      vadInterruptActiveGeneration()
+    }
+    stop()
+  }
+
   function seek(time: number) {
     if (!audio || !current.value) {
       return
@@ -335,6 +354,7 @@ export function useAudioPlayer() {
     stop,
     vadInterruptGeneration,
     vadInterruptActiveGeneration,
+    vadInterruptPlayback,
     seek
   }
 }

@@ -204,6 +204,7 @@ export function useRealtimeVoiceInput() {
   let processorNode: ScriptProcessorNode | null = null
   let muteGainNode: GainNode | null = null
   let errorTimer: number | null = null
+  let startRunId = 0
 
   const canStart = computed(() => asrStore.moduleEnabled && wsStore.connected)
   const isSpeaking = computed(() => isListening.value && (isSpeech.value || SPEAKING_STATES.has(listenState.value)))
@@ -237,6 +238,36 @@ export function useRealtimeVoiceInput() {
     isSpeech.value = false
     probability.value = null
     energy.value = null
+  }
+
+  function nextStartRunId() {
+    startRunId += 1
+    return startRunId
+  }
+
+  function isCurrentStartRun(runId: number) {
+    return runId === startRunId
+  }
+
+  function cleanupLocalAudioGraph(parts: {
+    stream?: MediaStream | null
+    context?: AudioContext | null
+    source?: MediaStreamAudioSourceNode | null
+    processor?: ScriptProcessorNode | null
+    gain?: GainNode | null
+  }) {
+    parts.processor?.disconnect()
+    parts.source?.disconnect()
+    parts.gain?.disconnect()
+    parts.stream?.getTracks().forEach(track => track.stop())
+
+    if (parts.processor) {
+      parts.processor.onaudioprocess = null
+    }
+
+    if (parts.context && parts.context.state !== 'closed') {
+      void parts.context.close()
+    }
   }
 
   function handleListenState(data?: unknown) {
@@ -292,6 +323,7 @@ export function useRealtimeVoiceInput() {
   }
 
   async function stop(options: StopOptions = {}) {
+    nextStartRunId()
     const session = activeSession
     const notifyBackend = options.notifyBackend ?? true
 
@@ -373,38 +405,94 @@ export function useRealtimeVoiceInput() {
     isStarting.value = true
     seq.value = 0
     resetListenState()
-    activeSession = { ...session }
+    const runId = nextStartRunId()
+
+    let nextMediaStream: MediaStream | null = null
+    let nextAudioContext: AudioContext | null = null
+    let nextSourceNode: MediaStreamAudioSourceNode | null = null
+    let nextProcessorNode: ScriptProcessorNode | null = null
+    let nextMuteGainNode: GainNode | null = null
 
     try {
-      mediaStream = await navigator.mediaDevices.getUserMedia({
+      nextMediaStream = await navigator.mediaDevices.getUserMedia({
         audio: buildAudioConstraints(asrStore.selectedAudioInput)
       })
+
+      if (!isCurrentStartRun(runId)) {
+        cleanupLocalAudioGraph({ stream: nextMediaStream })
+        return false
+      }
 
       if (!wsStore.connected) {
         throw new Error('WebSocket disconnected before realtime voice input started')
       }
 
-      audioContext = new AudioContextConstructor()
-      if (audioContext.state === 'suspended') {
-        await audioContext.resume()
+      nextAudioContext = new AudioContextConstructor()
+      if (nextAudioContext.state === 'suspended') {
+        await nextAudioContext.resume()
       }
 
-      sourceNode = audioContext.createMediaStreamSource(mediaStream)
-      processorNode = audioContext.createScriptProcessor(PROCESSOR_BUFFER_SIZE, 1, 1)
-      muteGainNode = audioContext.createGain()
-      muteGainNode.gain.value = 0
-      processorNode.onaudioprocess = handleAudioProcess
+      if (!isCurrentStartRun(runId)) {
+        cleanupLocalAudioGraph({
+          stream: nextMediaStream,
+          context: nextAudioContext
+        })
+        return false
+      }
 
-      sourceNode.connect(processorNode)
-      processorNode.connect(muteGainNode)
-      muteGainNode.connect(audioContext.destination)
+      nextSourceNode = nextAudioContext.createMediaStreamSource(nextMediaStream)
+      nextProcessorNode = nextAudioContext.createScriptProcessor(PROCESSOR_BUFFER_SIZE, 1, 1)
+      nextMuteGainNode = nextAudioContext.createGain()
+      nextMuteGainNode.gain.value = 0
+      nextProcessorNode.onaudioprocess = handleAudioProcess
 
+      if (!isCurrentStartRun(runId)) {
+        cleanupLocalAudioGraph({
+          stream: nextMediaStream,
+          context: nextAudioContext,
+          source: nextSourceNode,
+          processor: nextProcessorNode,
+          gain: nextMuteGainNode
+        })
+        return false
+      }
+
+      nextSourceNode.connect(nextProcessorNode)
+      nextProcessorNode.connect(nextMuteGainNode)
+      nextMuteGainNode.connect(nextAudioContext.destination)
+
+      if (!isCurrentStartRun(runId)) {
+        cleanupLocalAudioGraph({
+          stream: nextMediaStream,
+          context: nextAudioContext,
+          source: nextSourceNode,
+          processor: nextProcessorNode,
+          gain: nextMuteGainNode
+        })
+        return false
+      }
+
+      activeSession = { ...session }
+      mediaStream = nextMediaStream
+      audioContext = nextAudioContext
+      sourceNode = nextSourceNode
+      processorNode = nextProcessorNode
+      muteGainNode = nextMuteGainNode
       isListening.value = true
       isStarting.value = false
       return true
     } catch (err) {
-      setError(errorMessage(err))
-      cleanupAudioGraph()
+      cleanupLocalAudioGraph({
+        stream: nextMediaStream,
+        context: nextAudioContext,
+        source: nextSourceNode,
+        processor: nextProcessorNode,
+        gain: nextMuteGainNode
+      })
+      if (isCurrentStartRun(runId)) {
+        setError(errorMessage(err))
+        cleanupAudioGraph()
+      }
       return false
     }
   }

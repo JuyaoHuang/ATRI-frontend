@@ -104,8 +104,12 @@ async function toggleRealtimeVoiceInput() {
 
 watch(
   () => [activeChatId.value, activeCharacterId.value, asrStore.moduleEnabled] as const,
-  ([chatId, characterId, moduleEnabled]) => {
-    if (realtimeVoiceInput.isListening.value && (!chatId || !characterId || !moduleEnabled)) {
+  ([chatId, characterId, moduleEnabled], [previousChatId, previousCharacterId]) => {
+    const contextChanged = chatId !== previousChatId || characterId !== previousCharacterId
+    if (
+      (realtimeVoiceInput.isListening.value || realtimeVoiceInput.isStarting.value)
+      && (contextChanged || !chatId || !characterId || !moduleEnabled)
+    ) {
       void realtimeVoiceInput.stop({
         errorMessage: 'Realtime voice input stopped because chat context changed'
       })

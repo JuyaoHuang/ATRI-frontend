@@ -23,7 +23,7 @@ const props = withDefaults(defineProps<Props>(), {
   variant: 'default'
 })
 
-const { sendMessage, isStreaming } = useChat()
+const { sendMessage, connectionBusy } = useChat()
 const asrStore = useASRStore()
 const inputText = ref('')
 const autoSendPending = ref(false)
@@ -63,7 +63,7 @@ function clearAutoSendTimer() {
 
 function scheduleAutoSend() {
   clearAutoSendTimer()
-  if (!asrStore.moduleEnabled || !asrStore.autoSendEnabled || !hasText.value || isStreaming.value) {
+  if (!asrStore.moduleEnabled || !asrStore.autoSendEnabled || !hasText.value || connectionBusy.value) {
     return
   }
 
@@ -77,7 +77,7 @@ function scheduleAutoSend() {
 
 const handleSend = async () => {
   clearAutoSendTimer()
-  if (!hasText.value || isStreaming.value) {
+  if (!hasText.value || connectionBusy.value) {
     return
   }
 
@@ -144,7 +144,7 @@ function handleKeydown(event: KeyboardEvent) {
 }
 
 watch(
-  () => [asrStore.moduleEnabled, asrStore.autoSendEnabled, asrStore.autoSendDelay, isStreaming.value] as const,
+  () => [asrStore.moduleEnabled, asrStore.autoSendEnabled, asrStore.autoSendDelay, connectionBusy.value] as const,
   () => {
     if (!asrStore.moduleEnabled) {
       clearAutoSendTimer()
@@ -191,7 +191,7 @@ onUnmounted(() => {
           class="chat-input h-full min-h-0 w-full resize-none rounded-t-xl p-4 pb-[60px] focus:outline-none"
           :class="{ 'stage-chat-input': props.variant === 'stage' }"
           placeholder="Say something..."
-          :disabled="isStreaming"
+          :disabled="connectionBusy"
           @input="handleManualInput"
           @keydown="handleKeydown"
           @compositionstart="isComposing = true"
@@ -251,10 +251,10 @@ onUnmounted(() => {
         <button
           class="send-button px-5 py-2 rounded-xl transition-colors font-medium"
           :class="{ 'stage-send-button': props.variant === 'stage' }"
-          :disabled="!hasText || isStreaming"
+          :disabled="!hasText || connectionBusy"
           @click="() => void handleSend()"
         >
-          {{ isStreaming ? 'Sending...' : 'Send' }}
+          {{ connectionBusy ? 'Sending...' : 'Send' }}
         </button>
       </div>
     </div>

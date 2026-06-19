@@ -50,6 +50,11 @@ export function useChat() {
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return
+    if (chatStore.connectionBusy) return false
+    if (!wsStore.connected) {
+      toast.error('WebSocket is not connected')
+      return false
+    }
 
     const messageText = text.trim()
     const sentAt = new Date()
@@ -111,7 +116,7 @@ export function useChat() {
     }
 
     // 通过 WebSocket 发送
-    wsStore.send({
+    const sent = wsStore.send({
       type: 'input:text',
       data: {
         text: messageText,
@@ -122,13 +127,25 @@ export function useChat() {
     })
 
     // 标记为流式输出中
-    chatStore.isStreaming = true
+    if (!sent) {
+      toast.error('WebSocket is not connected')
+      return false
+    }
+
+    chatStore.beginStreaming({
+      chatId: currentChatId,
+      characterId: currentCharacterId
+    })
     return true
   }
 
   const loadHistory = async (chatId: string) => {
     try {
       const response = await chatsApi.get({ chat_id: chatId })
+      if (chatStore.currentChatId !== chatId) {
+        return
+      }
+
       let lastAssistantExpression: string | null = null
       chatStore.messages = response.messages.map((msg, index) => {
         // 如果是 AI 消息且有 name，从 characters store 获取 avatar
@@ -166,8 +183,9 @@ export function useChat() {
 
   return {
     messages: computed(() => chatStore.messages),
-    isStreaming: computed(() => chatStore.isStreaming),
-    streamingText: computed(() => chatStore.streamingText),
+    isStreaming: computed(() => chatStore.isCurrentChatStreaming),
+    connectionBusy: computed(() => chatStore.connectionBusy),
+    streamingText: computed(() => chatStore.isCurrentChatStreaming ? chatStore.streamingText : ''),
     sendMessage,
     loadHistory
   }

@@ -1,12 +1,22 @@
 import { defineStore } from 'pinia'
 import type { Message } from '@/types/message'
 
+export interface ActiveStream {
+  chatId: string
+  characterId: string
+  generationId: string | null
+  status: 'pending' | 'streaming' | 'interrupted'
+}
+
+type StreamApplyResult = 'ignored' | 'hidden' | 'visible'
+
 export interface ChatState {
   currentChatId: string | null
   currentCharacterId: string | null
   messages: Message[]
-  isStreaming: boolean
   streamingText: string
+  activeStream: ActiveStream | null
+  pendingInterruptedStream: ActiveStream | null
   skipNextHistoryLoadChatId: string | null
   pendingDeferredTitleChatId: string | null
   draftChatId: string | null
@@ -17,12 +27,18 @@ export const useChatStore = defineStore('chat', {
     currentChatId: null,
     currentCharacterId: null,
     messages: [],
-    isStreaming: false,
     streamingText: '',
+    activeStream: null,
+    pendingInterruptedStream: null,
     skipNextHistoryLoadChatId: null,
     pendingDeferredTitleChatId: null,
     draftChatId: null
   }),
+
+  getters: {
+    connectionBusy: state => state.activeStream !== null,
+    isCurrentChatStreaming: state => state.activeStream?.chatId === state.currentChatId
+  },
 
   actions: {
     setCurrentCharacter(characterId: string | null) {
@@ -100,6 +116,77 @@ export const useChatStore = defineStore('chat', {
       this.messages.push(message)
     },
 
+    beginStreaming(payload: {
+      chatId: string
+      characterId: string
+      generationId?: string | null
+    }) {
+      this.activeStream = {
+        chatId: payload.chatId,
+        characterId: payload.characterId,
+        generationId: payload.generationId || null,
+        status: 'pending'
+      }
+      this.streamingText = ''
+    },
+
+    matchesActiveStream(payload: {
+      chatId?: string
+      characterId?: string
+      generationId?: string
+    }, options: {
+      requireCharacter?: boolean
+      bindGeneration?: boolean
+      allowMissingGenerationAfterBind?: boolean
+    } = {}) {
+      const stream = this.activeStream
+      if (!stream || !payload.chatId || payload.chatId !== stream.chatId) {
+        return false
+      }
+
+      const requireCharacter = options.requireCharacter ?? true
+      if (requireCharacter && payload.characterId !== stream.characterId) {
+        return false
+      }
+      if (payload.characterId && payload.characterId !== stream.characterId) {
+        return false
+      }
+
+      if (payload.generationId) {
+        if (stream.generationId && stream.generationId !== payload.generationId) {
+          return false
+        }
+        if (!stream.generationId && options.bindGeneration !== false) {
+          stream.generationId = payload.generationId
+        }
+        return true
+      }
+
+      if (stream.generationId && options.allowMissingGenerationAfterBind !== true) {
+        return false
+      }
+
+      return true
+    },
+
+    matchesPendingInterruptedStream(payload: {
+      chatId?: string
+      characterId?: string
+      generationId?: string
+    }) {
+      const stream = this.pendingInterruptedStream
+      if (!stream || !payload.chatId || payload.chatId !== stream.chatId) {
+        return false
+      }
+      if (payload.characterId !== stream.characterId) {
+        return false
+      }
+      if (stream.generationId && payload.generationId !== stream.generationId) {
+        return false
+      }
+      return true
+    },
+
     addAsrTranscriptMessage(payload: {
       chatId: string
       characterId?: string
@@ -107,11 +194,20 @@ export const useChatStore = defineStore('chat', {
       generationId?: string
     }) {
       const content = payload.text.trim()
-      if (!content || this.currentChatId !== payload.chatId) {
-        return
+      if (!content || !payload.characterId) {
+        return false
       }
-      if (payload.characterId && this.currentCharacterId !== payload.characterId) {
-        return
+
+      this.beginStreaming({
+        chatId: payload.chatId,
+        characterId: payload.characterId,
+        generationId: payload.generationId
+      })
+
+      const visible = this.currentChatId === payload.chatId
+        && this.currentCharacterId === payload.characterId
+      if (!visible) {
+        return false
       }
 
       this.messages.push({
@@ -122,49 +218,99 @@ export const useChatStore = defineStore('chat', {
         timestamp: new Date().toISOString(),
         generation_id: payload.generationId
       })
-      this.streamingText = ''
-      this.isStreaming = true
+      return true
     },
 
-    appendStreamingChunk(chunk: string) {
-      this.streamingText += chunk
+    appendStreamingChunk(payload: {
+      chatId?: string
+      characterId?: string
+      generationId?: string
+      chunk: string
+    }): StreamApplyResult {
+      if (!this.matchesActiveStream(payload)) {
+        return 'ignored'
+      }
+
+      const stream = this.activeStream
+      if (!stream || stream.status === 'interrupted') {
+        return 'ignored'
+      }
+
+      stream.status = 'streaming'
+      this.streamingText += payload.chunk
+
+      return this.currentChatId === payload.chatId ? 'visible' : 'hidden'
     },
 
-    completeStreaming(fullReply: string, name?: string, avatar?: string, generationId?: string) {
-      if (this.currentChatId && this.currentCharacterId) {
+    completeStreaming(payload: {
+      chatId?: string
+      characterId?: string
+      fullReply: string
+      name?: string
+      avatar?: string
+      generationId?: string
+    }): StreamApplyResult {
+      if (!this.matchesActiveStream(payload) || this.activeStream?.status === 'interrupted') {
+        return 'ignored'
+      }
+
+      const visible = this.currentChatId === payload.chatId
+        && this.currentCharacterId === payload.characterId
+      if (visible && payload.chatId) {
         this.messages.push({
           id: `msg_${Date.now()}`,
-          chat_id: this.currentChatId,
+          chat_id: payload.chatId,
           role: 'ai',
-          content: fullReply,
+          content: payload.fullReply,
           timestamp: new Date().toISOString(),
-          name,
-          avatar,
-          generation_id: generationId
+          name: payload.name,
+          avatar: payload.avatar,
+          generation_id: payload.generationId
         })
       }
       this.streamingText = ''
-      this.isStreaming = false
+      this.activeStream = null
+      return visible ? 'visible' : 'hidden'
+    },
+
+    markActiveStreamInterrupted(payload: {
+      chatId?: string
+      characterId?: string
+      generationId?: string
+    }): StreamApplyResult {
+      if (!this.matchesActiveStream(payload, { requireCharacter: false })) {
+        return 'ignored'
+      }
+
+      if (this.activeStream) {
+        this.activeStream.status = 'interrupted'
+        this.pendingInterruptedStream = { ...this.activeStream }
+      }
+      const visible = this.currentChatId === payload.chatId
+      this.activeStream = null
+      this.streamingText = ''
+      return visible ? 'visible' : 'hidden'
     },
 
     interruptStreaming(payload: {
-      chatId: string
+      chatId?: string
       characterId?: string
       partialReply?: string
       generationId?: string
       interruptReason?: string
       name?: string
       avatar?: string
-    }) {
-      if (this.currentChatId !== payload.chatId) {
-        return
-      }
-      if (payload.characterId && this.currentCharacterId !== payload.characterId) {
-        return
+    }): StreamApplyResult {
+      const matchesActive = this.matchesActiveStream(payload)
+      const matchesPending = matchesActive ? false : this.matchesPendingInterruptedStream(payload)
+      if (!matchesActive && !matchesPending) {
+        return 'ignored'
       }
 
+      const visible = this.currentChatId === payload.chatId
+        && this.currentCharacterId === payload.characterId
       const content = (payload.partialReply || '').trim()
-      if (content) {
+      if (visible && payload.chatId && content) {
         this.messages.push({
           id: `interrupted_${payload.generationId || Date.now()}`,
           chat_id: payload.chatId,
@@ -179,13 +325,42 @@ export const useChatStore = defineStore('chat', {
         })
       }
       this.streamingText = ''
-      this.isStreaming = false
+      if (matchesActive) {
+        this.activeStream = null
+      }
+      if (matchesPending) {
+        this.pendingInterruptedStream = null
+      }
+      return visible ? 'visible' : 'hidden'
+    },
+
+    failActiveStream(payload: {
+      chatId?: string
+      generationId?: string
+    }) {
+      if (!this.matchesActiveStream(
+        payload,
+        {
+          requireCharacter: false,
+          bindGeneration: false,
+          allowMissingGenerationAfterBind: true
+        }
+      )) {
+        return false
+      }
+
+      this.activeStream = null
+      this.streamingText = ''
+      return true
+    },
+
+    clearActiveStream() {
+      this.activeStream = null
+      this.streamingText = ''
     },
 
     clearMessages() {
       this.messages = []
-      this.streamingText = ''
-      this.isStreaming = false
     }
   }
 })
