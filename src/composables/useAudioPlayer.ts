@@ -9,6 +9,7 @@ interface QueueItem {
   url: string
   source: 'auto' | 'manual' | 'test'
   generationId?: string
+  vadInterruptedAtWhenQueued?: number | null
 }
 
 interface EnqueueOptions {
@@ -103,12 +104,21 @@ function markVadGenerationInterrupted(generationId: string) {
   vadInterruptedGenerationIds.set(generationId, Date.now())
 }
 
-function isVadGenerationInterrupted(generationId?: string) {
+function getVadGenerationInterruptedAt(generationId?: string) {
   if (!generationId) {
-    return false
+    return null
   }
   pruneVadInterruptedGenerations()
-  return vadInterruptedGenerationIds.has(generationId)
+  return vadInterruptedGenerationIds.get(generationId) ?? null
+}
+
+function shouldSkipInterruptedQueueItem(item: QueueItem) {
+  const interruptedAt = getVadGenerationInterruptedAt(item.generationId)
+  if (item.source !== 'manual') {
+    return interruptedAt !== null
+  }
+
+  return interruptedAt !== null && interruptedAt !== item.vadInterruptedAtWhenQueued
 }
 
 function markCurrentVadGenerationsInterrupted() {
@@ -138,7 +148,7 @@ async function playNext() {
   if (!item) {
     return
   }
-  if (isVadGenerationInterrupted(item.generationId)) {
+  if (shouldSkipInterruptedQueueItem(item)) {
     revokeItem(item)
     void playNext()
     return
@@ -186,7 +196,8 @@ export function useAudioPlayer() {
 
     const source = options.source || 'manual'
     const generationId = options.generationId
-    if (isVadGenerationInterrupted(generationId)) {
+    const vadInterruptedAtBeforeSynthesis = getVadGenerationInterruptedAt(generationId)
+    if (source === 'auto' && vadInterruptedAtBeforeSynthesis !== null) {
       return
     }
 
@@ -218,7 +229,15 @@ export function useAudioPlayer() {
       }
     }
 
-    if (isVadGenerationInterrupted(generationId)) {
+    const vadInterruptedAtAfterSynthesis = getVadGenerationInterruptedAt(generationId)
+    if (source === 'auto' && vadInterruptedAtAfterSynthesis !== null) {
+      return
+    }
+    if (
+      source === 'manual'
+      && vadInterruptedAtAfterSynthesis !== null
+      && vadInterruptedAtAfterSynthesis !== vadInterruptedAtBeforeSynthesis
+    ) {
       return
     }
 
@@ -227,6 +246,7 @@ export function useAudioPlayer() {
       text: normalizedText,
       source,
       generationId,
+      vadInterruptedAtWhenQueued: source === 'manual' ? vadInterruptedAtAfterSynthesis : undefined,
       url: URL.createObjectURL(blob)
     }
     queue.value.push(item)
