@@ -189,6 +189,13 @@ export function useWebSocket() {
         generationId: completeData.generation_id
       })
 
+      if (completeData.generation_id) {
+        if (result === 'visible') {
+          audioPlayer.trackAudioGeneration(completeData.generation_id)
+        } else {
+          audioPlayer.discardGenerationAudio(completeData.generation_id)
+        }
+      }
       if (result !== 'ignored' && completeData.chat_id) {
         chatStore.consumePendingDeferredTitle(completeData.chat_id)
       }
@@ -258,6 +265,14 @@ export function useWebSocket() {
         || sequence < 0
         || typeof segmentData.audio !== 'string'
       ) {
+        return
+      }
+
+      if (
+        segmentData.chat_id !== chatStore.currentChatId
+        || segmentData.character_id !== chatStore.currentCharacterId
+      ) {
+        audioPlayer.discardGenerationAudio(generationId)
         return
       }
 
