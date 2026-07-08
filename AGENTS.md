@@ -13,11 +13,9 @@
   - `docs/DEVELOPMENT.md`
   - `docs/USER_CONFIG.md`
   - `readme.md`
-- **后端 VAD 设计文档位置**:
-  - `../docs/developments/wiki/VAD/vad-design.md`
-  - `../docs/developments/wiki/VAD/vad-implement.md`
-  - `../docs/developments/wiki/VAD/vad-implementation-plan.md`
-  - `../docs/developments/wiki/VAD/development.md`
+- **后端 TTS 设计文档位置**:
+  - `../docs/developments/wiki/TTS/tts-design.md`
+  - `../docs/developments/wiki/TTS/tts-implement.md`
 - **实现前必读**: 修改某个功能前，先阅读对应的前端文档和后端接口/设计文档。
 
 ---
@@ -53,9 +51,7 @@ npm run build
 
 ### 5. 设计一致性
 
-- 前端行为必须与后端 WebSocket/API 协议一致。
-- 如果实现中发现协议需要调整，先更新 `../docs/developments/wiki/VAD/` 下的设计文档，再改代码。
-- VAD 相关前端实现从 M3 开始，M2 只属于后端 WebSocket 协议扩展。
+前端行为必须与后端 WebSocket/API 协议一致。
 
 ---
 
@@ -116,26 +112,18 @@ npm run build
 
 ---
 
-## VAD 前端实现约束
-
-M3 以后实现实时语音输入时遵循：
-
-1. 前端通过 WebSocket 发送 `input:audio:chunk`。
-2. 后端返回 `control:listen-state` 和 `control:interrupt`。
-3. 收到 `control:interrupt` 后，调用现有 audio player stop 能力。
-4. 实时 VAD 主路径使用 16 kHz、mono、PCM float array。
-5. 优先使用 `AudioContext` / `AudioWorklet` 采集实时音频。
-6. `MediaRecorder` 保留为按钮式 ASR 或降级路径，不作为实时 VAD 主路径。
-7. 不在前端硬编码后端协议字段；协议字段以 `../docs/developments/wiki/VAD/development.md` 为准。
-
----
-
 ## 提交规范
 
-- 每个功能点一个 commit。
-- 不把无关格式化、空白变更和功能改动混在同一个 commit。
-- commit message 标准格式：`<type>(<scope>): <subject>`。
+*和后端 ../ 的 AGENT.md 相同*
+
+- 在开始子系统的实现前（如 LLM 调用模块），执行`git checkout -b feat/...` 切换分支，在新分支上开发，分支命名应准确、简洁、清晰。例如开发 LLM calling 模块，分支命名为：`feat/llm_calling`；开发 TTS 流式时：`feat/tts-streaming`
+
+- 每个功能点一个 commit，不要把多个不相关的改动混在一起
+
+- commit message 标准格式：`<type>(<scope>): <subject>`
+
 - `type` 必填，允许值：
+
   - `feat`：新功能
   - `fix`：Bug 修复
   - `docs`：文档变动
@@ -145,19 +133,34 @@ M3 以后实现实时语音输入时遵循：
   - `style`：代码格式（不改逻辑）
   - `chore`：杂项（依赖、配置、CI 等）
   - `revert`：回滚
-- `scope` 必填。属于 VAD 里程碑时使用 `M0`、`M1`、`M2`、`M3` 等；不属于里程碑时使用模块名，例如 `ui`、`websocket`、`asr`。
+
+- `scope` 必填，命名标准为：`branch-name/step`，例：1. 处在开发 LLM 调用模块的分支时，进行到第 4 步时，`llm-calling/step 4`；2. 在 ASR module 开发分支（`feat/asr`）时的第五步：`asr/step 5`，后续跟随具体的改动内容，简洁清晰。
+
+  而不属于步骤内容（分支开发的收尾工作）时使用操作名，例如 `ci`、`docs`、`frontend`。
+
 - `subject` 使用英文祈使句，首字母小写，句末不加句号，单行不超过 72 个字符。
+
 - 示例：
-  - `feat(M3): add realtime voice toggle`
-  - `feat(M3): send realtime audio chunks`
-  - `fix(M3): stop realtime listening on ws disconnect`
-  - `test(M3): add realtime voice input type checks`
-  - `chore(ui): update icon dependency`
+
+  - `feat(vad/step 2): add audio chunk message dispatch`
+  - `fix(vad/step 2): prevent duplicate interrupt on continuous speech`
+  - `test(vad/step 2): add audio message protocol tests`
+  - `docs(vad/step 3): update realtime voice input plan`
+  - `chore(vad/ci): update GitHub Actions runner version`
+
 - 如改动涉及多个文件的协调变更、技术决策或权衡，commit body 可选但建议填写；body 与 subject 之间空一行，每行不超过 72 个字符。
+
 - 不在 commit message 里写 TODO；未完成的工作拆到后续 commit。
+
 - 提交前至少通过当前改动范围对应的 basic check。
-- commit message 不包含 AI 协助信息。
-- 实现完成后等待负责人验收，再推送或发起 PR。
+
+- **注意**：commit 内容应该简洁，重点描述做了什么，不附带任何 AI 协助信息，例如"aaaa@claude.com<cooperate by claude>"。
+
+- 提交 commit 时如果触发 GPG 签名验证，前往`.env`文件获取密码`GPG_VERIFY_KEY`
+
+- **一个branch对应一次大的功能开发，一个 commit 对应功能开发里的一个 step 里的一个小点 point**
+
+- 验收结束后，执行`git push` 推送到上游仓库，并且执行`gh pr`进 PR 的提交 
 
 ---
 
