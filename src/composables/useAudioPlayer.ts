@@ -7,15 +7,33 @@ interface QueueItem {
   id: string
   text: string
   url: string
-  source: 'auto' | 'manual' | 'test'
+  source: 'auto' | 'manual' | 'test' | 'stream'
   generationId?: string
+  segmentId?: string
+  sequence?: number
+  mediaType?: string
   vadInterruptedAtWhenQueued?: number | null
 }
 
 interface EnqueueOptions {
-  source?: QueueItem['source']
+  source?: Exclude<QueueItem['source'], 'stream'>
   voiceId?: string
   generationId?: string
+}
+
+interface AudioSegmentOptions {
+  generationId: string
+  segmentId: string
+  sequence: number
+  text: string
+  audio: Blob
+  mediaType: string
+}
+
+interface StreamedAudioGenerationState {
+  seenSequences: Set<number>
+  completed: boolean
+  updatedAt: number
 }
 
 const queue = ref<QueueItem[]>([])
@@ -29,8 +47,10 @@ let audio: HTMLAudioElement | null = null
 // Keep VAD-interrupted ids long enough to reject late TTS results.
 const VAD_INTERRUPTED_GENERATION_TTL_MS = 5 * 60 * 1000
 const MAX_VAD_INTERRUPTED_GENERATIONS = 100
+const MAX_STREAMED_AUDIO_GENERATIONS = 100
 const vadInterruptedGenerationIds = new Map<string, number>()
 const activeSynthesisGenerationIds = new Set<string>()
+const streamedAudioGenerationStates = new Map<string, StreamedAudioGenerationState>()
 let vadInterruptEpoch = 0
 
 function finiteTime(value: number) {
@@ -105,6 +125,43 @@ function markVadGenerationInterrupted(generationId: string) {
   vadInterruptedGenerationIds.set(generationId, Date.now())
 }
 
+function pruneStreamedAudioGenerations() {
+  const overflow = streamedAudioGenerationStates.size - MAX_STREAMED_AUDIO_GENERATIONS
+  if (overflow <= 0) {
+    return
+  }
+
+  Array.from(streamedAudioGenerationStates.entries())
+    .sort(([, left], [, right]) => left.updatedAt - right.updatedAt)
+    .slice(0, overflow)
+    .forEach(([generationId]) => streamedAudioGenerationStates.delete(generationId))
+}
+
+function getStreamedAudioGenerationState(generationId: string) {
+  pruneStreamedAudioGenerations()
+  let state = streamedAudioGenerationStates.get(generationId)
+  if (!state) {
+    state = {
+      seenSequences: new Set<number>(),
+      completed: false,
+      updatedAt: Date.now()
+    }
+    streamedAudioGenerationStates.set(generationId, state)
+  }
+  state.updatedAt = Date.now()
+  return state
+}
+
+function markStreamSequenceSeen(generationId: string, sequence: number) {
+  const state = getStreamedAudioGenerationState(generationId)
+  if (state.seenSequences.has(sequence)) {
+    return false
+  }
+  state.seenSequences.add(sequence)
+  state.completed = false
+  return true
+}
+
 function bumpVadInterruptEpoch() {
   vadInterruptEpoch += 1
 }
@@ -137,6 +194,7 @@ function markCurrentVadGenerationsInterrupted() {
     }
   })
   activeSynthesisGenerationIds.forEach(generationId => generationIds.add(generationId))
+  streamedAudioGenerationStates.forEach((_state, generationId) => generationIds.add(generationId))
   generationIds.forEach(markVadGenerationInterrupted)
 }
 
@@ -262,6 +320,55 @@ export function useAudioPlayer() {
     await playNext()
   }
 
+  async function enqueueAudioSegment(segment: AudioSegmentOptions) {
+    const generationId = segment.generationId.trim()
+    const sequence = Number(segment.sequence)
+    if (!generationId || !Number.isInteger(sequence) || sequence < 0) {
+      return
+    }
+    if (getVadGenerationInterruptedAt(generationId) !== null) {
+      return
+    }
+    if (!markStreamSequenceSeen(generationId, sequence)) {
+      return
+    }
+
+    const item: QueueItem = {
+      id: `tts_stream_${generationId}_${sequence}_${segment.segmentId}`,
+      text: segment.text.trim(),
+      source: 'stream',
+      generationId,
+      segmentId: segment.segmentId,
+      sequence,
+      mediaType: segment.mediaType,
+      url: URL.createObjectURL(segment.audio)
+    }
+
+    if (shouldSkipInterruptedQueueItem(item)) {
+      revokeItem(item)
+      return
+    }
+
+    queue.value.push(item)
+    await playNext()
+  }
+
+  function skipAudioSegment(generationId: string, sequence: number) {
+    if (!generationId || !Number.isInteger(sequence) || sequence < 0) {
+      return
+    }
+    markStreamSequenceSeen(generationId, sequence)
+  }
+
+  function completeAudioGeneration(generationId: string) {
+    if (!generationId) {
+      return
+    }
+    const state = getStreamedAudioGenerationState(generationId)
+    state.completed = true
+    state.updatedAt = Date.now()
+  }
+
   function pause() {
     if (!audio || !current.value) {
       return
@@ -299,6 +406,7 @@ export function useAudioPlayer() {
 
   function vadInterruptGeneration(generationId: string) {
     markVadGenerationInterrupted(generationId)
+    streamedAudioGenerationStates.delete(generationId)
     queue.value = queue.value.filter(item => {
       if (item.generationId !== generationId) {
         return true
@@ -349,6 +457,9 @@ export function useAudioPlayer() {
     canSeek: computed(() => Boolean(current.value) && duration.value > 0),
     error: computed(() => error.value || ttsStore.error),
     enqueueText,
+    enqueueAudioSegment,
+    skipAudioSegment,
+    completeAudioGeneration,
     pause,
     resume,
     stop,

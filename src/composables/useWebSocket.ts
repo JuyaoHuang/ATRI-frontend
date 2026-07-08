@@ -44,6 +44,35 @@ interface ChatErrorData {
   generation_id?: string
 }
 
+interface AudioSegmentData {
+  chat_id?: string
+  character_id?: string
+  generation_id?: string
+  segment_id?: string
+  sequence?: number
+  audio?: string
+  media_type?: string
+  display_text?: string
+  tts_text?: string
+}
+
+interface AudioCompleteData {
+  chat_id?: string
+  character_id?: string
+  generation_id?: string
+  last_sequence?: number | null
+}
+
+interface AudioErrorData {
+  chat_id?: string
+  character_id?: string
+  generation_id?: string
+  segment_id?: string
+  sequence?: number
+  code?: string
+  message?: string
+}
+
 interface InterruptData {
   chat_id?: string
   character_id?: string
@@ -62,6 +91,9 @@ export function useWebSocket() {
   const enqueueAutoSpeech = async (text: string, generationId?: string) => {
     await ttsStore.ensureLoaded()
     if (!generationId || !ttsStore.moduleEnabled || !ttsStore.autoPlayEnabled || !text.trim()) {
+      return
+    }
+    if (ttsStore.streamingAutoPlayEnabled) {
       return
     }
     await audioPlayer.enqueueText(text, { source: 'auto', generationId })
@@ -210,6 +242,66 @@ export function useWebSocket() {
       })
     })
 
+    wsManager.on('audio:segment', (data: unknown) => {
+      if (!isCurrentManager()) {
+        return
+      }
+
+      const segmentData = data as AudioSegmentData
+      const generationId = segmentData.generation_id
+      const segmentId = segmentData.segment_id
+      const sequence = Number(segmentData.sequence)
+      if (
+        !generationId
+        || !segmentId
+        || !Number.isInteger(sequence)
+        || sequence < 0
+        || typeof segmentData.audio !== 'string'
+      ) {
+        return
+      }
+
+      try {
+        const mediaType = segmentData.media_type || 'application/octet-stream'
+        const audio = base64ToBlob(segmentData.audio, mediaType)
+        void audioPlayer.enqueueAudioSegment({
+          generationId,
+          segmentId,
+          sequence,
+          text: segmentData.display_text || segmentData.tts_text || '',
+          audio,
+          mediaType
+        })
+      } catch (error) {
+        console.error('Failed to decode TTS audio segment:', error)
+      }
+    })
+
+    wsManager.on('audio:error', (data: unknown) => {
+      if (!isCurrentManager()) {
+        return
+      }
+
+      const errorData = data as AudioErrorData
+      const generationId = errorData.generation_id
+      const sequence = Number(errorData.sequence)
+      if (generationId && Number.isInteger(sequence) && sequence >= 0) {
+        audioPlayer.skipAudioSegment(generationId, sequence)
+      }
+      console.warn('TTS audio segment failed:', errorData.code || errorData.message || 'unknown')
+    })
+
+    wsManager.on('audio:complete', (data: unknown) => {
+      if (!isCurrentManager()) {
+        return
+      }
+
+      const completeData = data as AudioCompleteData
+      if (completeData.generation_id) {
+        audioPlayer.completeAudioGeneration(completeData.generation_id)
+      }
+    })
+
     wsManager.on('asr:transcript', (data: unknown) => {
       if (!isCurrentManager()) {
         return
@@ -278,4 +370,13 @@ function normalizeWebSocketUrl(url: string) {
     parsed.protocol = 'wss:'
   }
   return parsed.toString()
+}
+
+function base64ToBlob(base64: string, mediaType: string) {
+  const binary = window.atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index)
+  }
+  return new Blob([bytes], { type: mediaType })
 }
