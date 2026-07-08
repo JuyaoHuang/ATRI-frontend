@@ -1,4 +1,4 @@
-import { computed } from 'vue'
+import { computed, markRaw } from 'vue'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import { useWebSocketStore } from '@/stores/websocket'
 import { useChatStore } from '@/stores/chat'
@@ -127,7 +127,7 @@ export function useWebSocket() {
 
     existingManager?.destroy()
 
-    const wsManager = new WebSocketManager(wsUrl)
+    const wsManager = markRaw(new WebSocketManager(wsUrl))
     const isCurrentManager = () => wsStore.wsManager === wsManager
     wsStore.wsManager = wsManager
     wsStore.reconnecting = false
