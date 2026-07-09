@@ -17,30 +17,14 @@ import {
   type InterruptData,
   type AsrTranscriptData,
   type ConnectionStatusEvent,
+  type SendAudioChunkPayload,
+  type SendAudioEndPayload,
+  type SendTextPayload,
   type WebSocketSessionEventMap
 } from '@/types/websocket'
 import { extractLive2dExpression } from '@/utils/live2dExpression'
 import { websocketSessionController } from '@/utils/websocketSessionController'
 import { useLive2dStore } from '@/stores/live2d'
-
-interface SendTextPayload {
-  text: string
-  chatId: string
-  characterId: string
-  clientContext?: unknown
-}
-
-interface SendAudioChunkPayload {
-  chatId: string
-  characterId: string
-  audio: number[]
-  seq: number
-}
-
-interface SendAudioEndPayload {
-  chatId: string
-  characterId: string
-}
 
 let defaultHandlersRegistered = false
 

@@ -1,28 +1,12 @@
 import {
   ConnectionStatus,
   type ParsedWebSocketMessage,
+  type SendAudioChunkPayload,
+  type SendAudioEndPayload,
+  type SendTextPayload,
   type WebSocketSessionEventMap
 } from '@/types/websocket'
 import { WebSocketManager } from '@/utils/websocket'
-
-interface SendTextPayload {
-  text: string
-  chatId: string
-  characterId: string
-  clientContext?: unknown
-}
-
-interface SendAudioChunkPayload {
-  chatId: string
-  characterId: string
-  audio: number[]
-  seq: number
-}
-
-interface SendAudioEndPayload {
-  chatId: string
-  characterId: string
-}
 
 type SessionEventName = keyof WebSocketSessionEventMap
 type SessionEventListener<K extends SessionEventName> = (payload: WebSocketSessionEventMap[K]) => void

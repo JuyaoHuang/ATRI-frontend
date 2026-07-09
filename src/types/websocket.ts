@@ -8,6 +8,25 @@ export const ConnectionStatus = {
 
 export type ConnectionStatus = typeof ConnectionStatus[keyof typeof ConnectionStatus]
 
+export interface SendTextPayload {
+  text: string
+  chatId: string
+  characterId: string
+  clientContext?: unknown
+}
+
+export interface SendAudioChunkPayload {
+  chatId: string
+  characterId: string
+  audio: number[]
+  seq: number
+}
+
+export interface SendAudioEndPayload {
+  chatId: string
+  characterId: string
+}
+
 export interface AsrTranscriptData {
   text?: string
   chat_id?: string
