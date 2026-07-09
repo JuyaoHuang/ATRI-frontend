@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, watch } from 'vue'
+import { watch } from 'vue'
 
 import { useChat } from '@/composables/useChat'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
@@ -17,14 +17,10 @@ const props = withDefaults(defineProps<Props>(), {
   variant: 'default'
 })
 
-const { connect, connected, reconnecting } = useWebSocket()
+const { connected, reconnecting } = useWebSocket()
 const { loadHistory } = useChat()
 const chatStore = useChatStore()
 const audioPlayer = useAudioPlayer()
-
-onMounted(() => {
-  connect()
-})
 
 watch(
   () => chatStore.currentChatId,

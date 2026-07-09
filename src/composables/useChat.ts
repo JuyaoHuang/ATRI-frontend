@@ -7,7 +7,7 @@ import { useCharactersStore } from '@/stores/characters'
 import { useChatStore } from '@/stores/chat'
 import { useChatsStore } from '@/stores/chats'
 import { useLive2dStore } from '@/stores/live2d'
-import { useWebSocketStore } from '@/stores/websocket'
+import { useWebSocket } from '@/composables/useWebSocket'
 import { extractLive2dExpression } from '@/utils/live2dExpression'
 
 interface ClientDatetimeContext {
@@ -45,7 +45,7 @@ function buildClientContext(date: Date): ClientContext {
 export function useChat() {
   const chatStore = useChatStore()
   const chatsStore = useChatsStore()
-  const wsStore = useWebSocketStore()
+  const { canSend, sendText } = useWebSocket()
   const charactersStore = useCharactersStore()
   const live2dStore = useLive2dStore()
   const audioPlayer = useAudioPlayer()
@@ -53,7 +53,7 @@ export function useChat() {
   const sendMessage = async (text: string) => {
     if (!text.trim()) return
     if (chatStore.connectionBusy) return false
-    if (!wsStore.connected) {
+    if (!canSend()) {
       toast.error('WebSocket is not connected')
       return false
     }
@@ -64,7 +64,7 @@ export function useChat() {
     const clientContext = buildClientContext(sentAt)
     const currentCharacterId = charactersStore.activeCharacterId || chatStore.currentCharacterId
     let currentChatId = chatStore.currentChatId
-    let isDraftChat = false
+    let deferredTitleSeed: string | null = null
 
     if (!currentCharacterId) {
       console.error('No character selected')
@@ -75,16 +75,7 @@ export function useChat() {
     if (!currentChatId) {
       const draftChat = chatsStore.insertDraftChat(currentCharacterId, messageText)
       currentChatId = draftChat.id
-      isDraftChat = true
       chatStore.beginDraftChat(draftChat.id, currentCharacterId)
-
-      chatStore.addMessage({
-        id: `msg_${Date.now()}`,
-        chat_id: currentChatId,
-        role: 'human',
-        content: messageText,
-        timestamp: sentAtIso
-      })
 
       try {
         const newChat = await chatsStore.createChat(currentCharacterId, messageText, true, {
@@ -92,10 +83,9 @@ export function useChat() {
         })
         chatsStore.replaceDraftChat(draftChat.id, newChat)
         chatStore.markSkipNextHistoryLoad(newChat.id)
-        chatStore.markPendingDeferredTitle(newChat.id)
         chatStore.replaceCurrentChatId(draftChat.id, newChat.id)
         chatStore.setCurrentCharacter(currentCharacterId)
-        chatsStore.watchDeferredTitle(newChat.id, currentCharacterId, draftChat.title)
+        deferredTitleSeed = draftChat.title
         currentChatId = newChat.id
       } catch (error) {
         console.error('自动创建聊天失败:', error)
@@ -106,38 +96,36 @@ export function useChat() {
       }
     }
 
-    if (!isDraftChat) {
-      // 添加用户消息到本地状态
-      chatStore.addMessage({
-        id: `msg_${Date.now()}`,
-        chat_id: currentChatId,
-        role: 'human',
-        content: messageText,
-        timestamp: sentAtIso
-      })
-    }
-
-    // 通过 WebSocket 发送
-    const sent = wsStore.send({
-      type: 'input:text',
-      data: {
-        text: messageText,
-        chat_id: currentChatId,
-        character_id: currentCharacterId,
-        client_context: clientContext
-      }
-    })
-
-    // 标记为流式输出中
-    if (!sent) {
-      toast.error('WebSocket is not connected')
-      return false
-    }
-
     audioPlayer.stopBecauseContextChanged()
     chatStore.beginStreaming({
       chatId: currentChatId,
       characterId: currentCharacterId
+    })
+
+    const sent = sendText({
+      text: messageText,
+      chatId: currentChatId,
+      characterId: currentCharacterId,
+      clientContext
+    })
+
+    if (!sent) {
+      toast.error('WebSocket is not connected')
+      chatStore.clearActiveStream()
+      return false
+    }
+
+    if (deferredTitleSeed) {
+      chatStore.markPendingDeferredTitle(currentChatId)
+      chatsStore.watchDeferredTitle(currentChatId, currentCharacterId, deferredTitleSeed)
+    }
+
+    chatStore.addMessage({
+      id: `msg_${Date.now()}`,
+      chat_id: currentChatId,
+      role: 'human',
+      content: messageText,
+      timestamp: sentAtIso
     })
     return true
   }
