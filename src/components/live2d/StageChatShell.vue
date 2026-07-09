@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 import InputBox from '@/components/chat/InputBox.vue'
 import ChatHistory from '@/components/sidebar/ChatHistory.vue'
@@ -13,7 +13,7 @@ import StageChatHistory from './StageChatHistory.vue'
 type PanelMode = 'history' | 'characters' | null
 
 const panelMode = ref<PanelMode>(null)
-const { connected, reconnecting, connect } = useWebSocket()
+const { connected, reconnecting } = useWebSocket()
 const { loadHistory } = useChat()
 const chatStore = useChatStore()
 const audioPlayer = useAudioPlayer()
@@ -41,10 +41,6 @@ const closePanel = () => {
 const handleCharacterSelected = () => {
   panelMode.value = 'history'
 }
-
-onMounted(() => {
-  connect()
-})
 
 watch(
   () => chatStore.currentChatId,

@@ -1,13 +1,12 @@
 import { computed, onUnmounted, ref, watch } from 'vue'
 
 import { useASRStore } from '@/stores/asr'
-import { useWebSocketStore } from '@/stores/websocket'
+import { useWebSocket } from '@/composables/useWebSocket'
+import type { VadListenStateData } from '@/types/websocket'
 
 const TARGET_SAMPLE_RATE = 16000
 const PROCESSOR_BUFFER_SIZE = 4096
 const ERROR_DISPLAY_MS = 3000
-const AUDIO_CHUNK_TYPE = 'input:audio:chunk'
-const AUDIO_END_TYPE = 'input:audio:end'
 const LISTEN_STATE_EVENT = 'vad:listen-state'
 const SPEAKING_STATES = new Set(['speech_start', 'speech_chunk'])
 
@@ -23,40 +22,9 @@ export interface RealtimeVoiceInputSession {
   characterId: string
 }
 
-interface RealtimeAudioChunkMessage {
-  type: typeof AUDIO_CHUNK_TYPE
-  data: {
-    chat_id: string
-    character_id: string
-    audio: number[]
-    seq: number
-  }
-}
-
-interface RealtimeAudioEndMessage {
-  type: typeof AUDIO_END_TYPE
-  data: {
-    chat_id: string
-    character_id: string
-  }
-}
-
 interface StopOptions {
   notifyBackend?: boolean
   errorMessage?: string
-}
-
-interface VadListenStateData {
-  chat_id?: string
-  character_id?: string
-  state?: string
-  is_speech?: boolean
-  seq?: number
-  probability?: number
-  energy?: number
-  code?: string
-  message?: string
-  reason?: string
 }
 
 function errorMessage(error: unknown): string {
@@ -122,32 +90,6 @@ function buildAudioConstraints(deviceId: string): MediaTrackConstraints {
   return constraints
 }
 
-function buildAudioChunkMessage(
-  session: RealtimeVoiceInputSession,
-  audio: number[],
-  seq: number
-): RealtimeAudioChunkMessage {
-  return {
-    type: AUDIO_CHUNK_TYPE,
-    data: {
-      chat_id: session.chatId,
-      character_id: session.characterId,
-      audio,
-      seq
-    }
-  }
-}
-
-function buildAudioEndMessage(session: RealtimeVoiceInputSession): RealtimeAudioEndMessage {
-  return {
-    type: AUDIO_END_TYPE,
-    data: {
-      chat_id: session.chatId,
-      character_id: session.characterId
-    }
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -186,7 +128,14 @@ function normalizeListenState(state: string | undefined): VadListenState {
 
 export function useRealtimeVoiceInput() {
   const asrStore = useASRStore()
-  const wsStore = useWebSocketStore()
+  const {
+    canSend,
+    connected,
+    sendAudioChunk,
+    sendAudioEnd,
+    on: onSocketEvent,
+    off: offSocketEvent
+  } = useWebSocket()
 
   const isListening = ref(false)
   const isStarting = ref(false)
@@ -206,7 +155,7 @@ export function useRealtimeVoiceInput() {
   let errorTimer: number | null = null
   let startRunId = 0
 
-  const canStart = computed(() => asrStore.moduleEnabled && wsStore.connected)
+  const canStart = computed(() => asrStore.moduleEnabled && connected.value)
   const isSpeaking = computed(() => isListening.value && (isSpeech.value || SPEAKING_STATES.has(listenState.value)))
 
   function clearErrorTimer() {
@@ -294,7 +243,7 @@ export function useRealtimeVoiceInput() {
   }
 
   function detachListenStateListener() {
-    wsStore.wsManager?.off(LISTEN_STATE_EVENT, handleListenState)
+    offSocketEvent(LISTEN_STATE_EVENT, handleListenState)
   }
 
   function cleanupAudioGraph() {
@@ -334,7 +283,10 @@ export function useRealtimeVoiceInput() {
     cleanupAudioGraph()
 
     if (session && notifyBackend) {
-      wsStore.sendIfOpen(buildAudioEndMessage(session))
+      sendAudioEnd({
+        chatId: session.chatId,
+        characterId: session.characterId
+      })
     }
   }
 
@@ -343,7 +295,7 @@ export function useRealtimeVoiceInput() {
       return
     }
 
-    if (!wsStore.connected) {
+    if (!canSend()) {
       void stop({
         notifyBackend: false,
         errorMessage: 'WebSocket disconnected; realtime voice input stopped'
@@ -360,7 +312,12 @@ export function useRealtimeVoiceInput() {
     }
 
     seq.value += 1
-    const sent = wsStore.sendIfOpen(buildAudioChunkMessage(activeSession, audio, seq.value))
+    const sent = sendAudioChunk({
+      chatId: activeSession.chatId,
+      characterId: activeSession.characterId,
+      audio,
+      seq: seq.value
+    })
     if (!sent) {
       void stop({
         notifyBackend: false,
@@ -386,7 +343,7 @@ export function useRealtimeVoiceInput() {
       return false
     }
 
-    if (!wsStore.connected) {
+    if (!canSend()) {
       setError('WebSocket is not connected')
       return false
     }
@@ -423,7 +380,7 @@ export function useRealtimeVoiceInput() {
         return false
       }
 
-      if (!wsStore.connected) {
+      if (!canSend()) {
         throw new Error('WebSocket disconnected before realtime voice input started')
       }
 
@@ -497,17 +454,10 @@ export function useRealtimeVoiceInput() {
     }
   }
 
-  watch(
-    () => wsStore.wsManager,
-    (manager, previousManager) => {
-      previousManager?.off(LISTEN_STATE_EVENT, handleListenState)
-      manager?.on(LISTEN_STATE_EVENT, handleListenState)
-    },
-    { immediate: true }
-  )
+  onSocketEvent(LISTEN_STATE_EVENT, handleListenState)
 
   watch(
-    () => wsStore.connected,
+    () => connected.value,
     (connected) => {
       if (!connected && (isListening.value || isStarting.value)) {
         void stop({

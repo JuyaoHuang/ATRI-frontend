@@ -1,10 +1,21 @@
-type WebSocketListener = (data?: unknown) => void
+import type { ParsedWebSocketMessage } from '@/types/websocket'
+
+type WebSocketEventMap = {
+  connecting: undefined
+  connected: undefined
+  disconnected: { willReconnect: boolean }
+  error: unknown
+  message: ParsedWebSocketMessage
+}
+
+type WebSocketEventName = keyof WebSocketEventMap
+type WebSocketListener<K extends WebSocketEventName> = (data: WebSocketEventMap[K]) => void
 
 export class WebSocketManager {
   private ws: WebSocket | null = null
   private reconnectTimer: number | null = null
   private heartbeatTimer: number | null = null
-  private listeners: Map<string, WebSocketListener[]> = new Map()
+  private listeners: Map<WebSocketEventName, Array<WebSocketListener<WebSocketEventName>>> = new Map()
   private shouldReconnect = true
   private destroyed = false
   private readonly url: string
@@ -17,13 +28,13 @@ export class WebSocketManager {
     return this.url
   }
 
+  canSend(): boolean {
+    return this.ws?.readyState === WebSocket.OPEN
+  }
+
   isOpenOrConnecting(): boolean {
     return this.ws?.readyState === WebSocket.OPEN
       || this.ws?.readyState === WebSocket.CONNECTING
-  }
-
-  isReconnectEnabled(): boolean {
-    return this.shouldReconnect && !this.destroyed
   }
 
   connect(): void {
@@ -32,6 +43,11 @@ export class WebSocketManager {
     }
 
     this.shouldReconnect = true
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer)
+      this.reconnectTimer = null
+    }
+    this.emit('connecting', undefined)
     const socket = new WebSocket(this.url)
     this.ws = socket
 
@@ -40,7 +56,7 @@ export class WebSocketManager {
         return
       }
       console.log('WebSocket connected')
-      this.emit('connected')
+      this.emit('connected', undefined)
       this.startHeartbeat()
     }
 
@@ -50,8 +66,7 @@ export class WebSocketManager {
       }
       try {
         const message = JSON.parse(event.data)
-        this.emit('message', message)
-        this.handleMessage(message)
+        this.emit('message', message as ParsedWebSocketMessage)
       } catch (error) {
         console.error('Failed to parse WebSocket message:', error)
       }
@@ -71,9 +86,10 @@ export class WebSocketManager {
       }
       console.log('WebSocket closed')
       this.ws = null
-      this.emit('disconnected')
+      const willReconnect = this.shouldReconnect
       this.stopHeartbeat()
-      if (this.shouldReconnect) {
+      this.emit('disconnected', { willReconnect })
+      if (willReconnect) {
         this.scheduleReconnect()
       }
     }
@@ -100,26 +116,32 @@ export class WebSocketManager {
   }
 
   send(message: unknown): boolean {
-    if (this.ws?.readyState !== WebSocket.OPEN) {
+    if (!this.canSend()) {
       return false
     }
 
-    this.ws.send(JSON.stringify(message))
-    return true
+    const socket = this.ws
+    if (!socket) {
+      return false
+    }
+
+    try {
+      socket.send(JSON.stringify(message))
+      return true
+    } catch (error) {
+      console.error('Failed to send WebSocket message:', error)
+      return false
+    }
   }
 
-  sendIfOpen(message: unknown): boolean {
-    return this.send(message)
-  }
-
-  on(event: string, callback: WebSocketListener): void {
+  on<K extends WebSocketEventName>(event: K, callback: WebSocketListener<K>): void {
     if (!this.listeners.has(event)) {
       this.listeners.set(event, [])
     }
-    this.listeners.get(event)!.push(callback)
+    this.listeners.get(event)!.push(callback as WebSocketListener<WebSocketEventName>)
   }
 
-  off(event: string, callback: WebSocketListener): void {
+  off<K extends WebSocketEventName>(event: K, callback: WebSocketListener<K>): void {
     const callbacks = this.listeners.get(event)
     if (!callbacks) {
       return
@@ -134,48 +156,11 @@ export class WebSocketManager {
     this.listeners.set(event, nextCallbacks)
   }
 
-  private emit(event: string, data?: unknown): void {
+  private emit<K extends WebSocketEventName>(event: K, data: WebSocketEventMap[K]): void {
     const callbacks = this.listeners.get(event) || []
-    callbacks.forEach(callback => callback(data))
-  }
-
-  private handleMessage(message: { type: string; data?: unknown }): void {
-    switch (message.type) {
-      case 'output:chat:chunk':
-        this.emit('chat:chunk', message.data)
-        break
-      case 'output:chat:complete':
-        this.emit('chat:complete', message.data)
-        break
-      case 'output:chat:interrupted':
-        this.emit('chat:interrupted', message.data)
-        break
-      case 'output:audio:segment':
-        this.emit('audio:segment', message.data)
-        break
-      case 'output:audio:complete':
-        this.emit('audio:complete', message.data)
-        break
-      case 'output:audio:error':
-        this.emit('audio:error', message.data)
-        break
-      case 'output:asr:transcript':
-        this.emit('asr:transcript', message.data)
-        break
-      case 'control:listen-state':
-        this.emit('vad:listen-state', message.data)
-        break
-      case 'control:interrupt':
-        this.emit('vad:interrupt', message.data)
-        break
-      case 'error':
-        this.emit('chat:error', message.data)
-        break
-      case 'pong':
-        break
-      default:
-        console.warn('Unknown message type:', message.type)
-    }
+    callbacks.forEach(callback => {
+      (callback as WebSocketListener<K>)(data)
+    })
   }
 
   private startHeartbeat(): void {

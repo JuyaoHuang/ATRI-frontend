@@ -1,28 +1,29 @@
 import { defineStore } from 'pinia'
-import type { WebSocketManager } from '@/utils/websocket'
+import { ConnectionStatus } from '@/types/websocket'
 
 export interface WebSocketState {
-  connected: boolean
-  reconnecting: boolean
+  connectionStatus: ConnectionStatus
   error: string | null
-  wsManager: WebSocketManager | null
 }
 
 export const useWebSocketStore = defineStore('websocket', {
   state: (): WebSocketState => ({
-    connected: false,
-    reconnecting: false,
-    error: null,
-    wsManager: null
+    connectionStatus: ConnectionStatus.IDLE,
+    error: null
   }),
 
+  getters: {
+    connected: state => state.connectionStatus === ConnectionStatus.CONNECTED,
+    reconnecting: state => state.connectionStatus === ConnectionStatus.RECONNECTING
+  },
+
   actions: {
-    send(message: unknown): boolean {
-      return this.wsManager?.send(message) ?? false
+    setConnectionStatus(status: ConnectionStatus) {
+      this.connectionStatus = status
     },
 
-    sendIfOpen(message: unknown): boolean {
-      return this.wsManager?.sendIfOpen(message) ?? false
+    setError(error: string | null) {
+      this.error = error
     }
   }
 })

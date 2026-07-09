@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, watch } from 'vue'
+import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { breakpointsTailwind, useBreakpoints, useMouse, useWindowSize } from '@vueuse/core'
 
 import { useTheme } from '@/composables/useTheme'
+import { useWebSocket } from '@/composables/useWebSocket'
 import ChatArea from '@/components/chat/ChatArea.vue'
 import Live2DCanvas from '@/components/live2d/Live2DCanvas.vue'
 import StageChatShell from '@/components/live2d/StageChatShell.vue'
@@ -12,6 +13,7 @@ import { useCharactersStore } from '@/stores/characters'
 import { useLive2dStore } from '@/stores/live2d'
 
 const { isDark, toggleDark } = useTheme()
+const { connect, disconnect } = useWebSocket()
 const charactersStore = useCharactersStore()
 const live2dStore = useLive2dStore()
 const isLive2dMode = computed(() => live2dStore.enabled)
@@ -26,8 +28,13 @@ const stageModelPosition = computed(() => ({
 }))
 
 onMounted(() => {
+  connect()
   void charactersStore.fetchCharacters()
   void live2dStore.fetchModels()
+})
+
+onUnmounted(() => {
+  disconnect()
 })
 
 watch(isLive2dMode, (enabled) => {
