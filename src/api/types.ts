@@ -114,17 +114,27 @@ export interface ASRUploadMetadata {
 // TTS related
 export type TTSProviderConfig = Record<string, string | number | boolean | null | undefined>
 
+export interface TTSStreamingConfig {
+  enabled: boolean
+  segment_method: string
+  faster_first_response: boolean
+  max_concurrent_synthesis: number
+  max_pending_segments: number
+  [key: string]: string | number | boolean | null | undefined
+}
+
 export interface TTSConfig {
   tts_model: string
   enabled: boolean
   auto_play: boolean
   show_player_on_home: boolean
   volume: number
+  streaming: TTSStreamingConfig
   edge_tts?: TTSProviderConfig
   gpt_sovits_tts?: TTSProviderConfig
   siliconflow_tts?: TTSProviderConfig
   cosyvoice3_tts?: TTSProviderConfig
-  [key: string]: string | number | boolean | TTSProviderConfig | undefined
+  [key: string]: string | number | boolean | TTSProviderConfig | TTSStreamingConfig | undefined
 }
 
 export interface TTSProviderStatus {

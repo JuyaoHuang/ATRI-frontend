@@ -2,6 +2,7 @@ import { computed } from 'vue'
 import { toast } from 'vue-sonner'
 
 import { chatsApi } from '@/api/chats'
+import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import { useCharactersStore } from '@/stores/characters'
 import { useChatStore } from '@/stores/chat'
 import { useChatsStore } from '@/stores/chats'
@@ -47,6 +48,7 @@ export function useChat() {
   const wsStore = useWebSocketStore()
   const charactersStore = useCharactersStore()
   const live2dStore = useLive2dStore()
+  const audioPlayer = useAudioPlayer()
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return
@@ -132,6 +134,7 @@ export function useChat() {
       return false
     }
 
+    audioPlayer.stopBecauseContextChanged()
     chatStore.beginStreaming({
       chatId: currentChatId,
       characterId: currentCharacterId

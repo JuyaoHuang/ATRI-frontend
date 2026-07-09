@@ -5,6 +5,7 @@ import InputBox from '@/components/chat/InputBox.vue'
 import ChatHistory from '@/components/sidebar/ChatHistory.vue'
 import CharacterSelector from '@/components/sidebar/CharacterSelector.vue'
 import { useChat } from '@/composables/useChat'
+import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useChatStore } from '@/stores/chat'
 import StageChatHistory from './StageChatHistory.vue'
@@ -15,6 +16,7 @@ const panelMode = ref<PanelMode>(null)
 const { connected, reconnecting, connect } = useWebSocket()
 const { loadHistory } = useChat()
 const chatStore = useChatStore()
+const audioPlayer = useAudioPlayer()
 
 const connectionLabel = computed(() => {
   if (connected.value) {
@@ -63,6 +65,15 @@ watch(
     }
   },
   { immediate: true },
+)
+
+watch(
+  () => [chatStore.currentChatId, chatStore.currentCharacterId] as const,
+  ([chatId, characterId], [previousChatId, previousCharacterId]) => {
+    if (chatId !== previousChatId || characterId !== previousCharacterId) {
+      audioPlayer.stopBecauseContextChanged()
+    }
+  },
 )
 </script>
 

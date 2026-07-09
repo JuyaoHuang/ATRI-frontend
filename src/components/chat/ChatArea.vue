@@ -2,6 +2,7 @@
 import { onMounted, watch } from 'vue'
 
 import { useChat } from '@/composables/useChat'
+import { useAudioPlayer } from '@/composables/useAudioPlayer'
 import { useWebSocket } from '@/composables/useWebSocket'
 import { useChatStore } from '@/stores/chat'
 
@@ -19,6 +20,7 @@ const props = withDefaults(defineProps<Props>(), {
 const { connect, connected, reconnecting } = useWebSocket()
 const { loadHistory } = useChat()
 const chatStore = useChatStore()
+const audioPlayer = useAudioPlayer()
 
 onMounted(() => {
   connect()
@@ -38,6 +40,15 @@ watch(
     }
     else {
       chatStore.clearMessages()
+    }
+  },
+)
+
+watch(
+  () => [chatStore.currentChatId, chatStore.currentCharacterId] as const,
+  ([chatId, characterId], [previousChatId, previousCharacterId]) => {
+    if (chatId !== previousChatId || characterId !== previousCharacterId) {
+      audioPlayer.stopBecauseContextChanged()
     }
   },
 )

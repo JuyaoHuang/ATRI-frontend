@@ -150,6 +150,15 @@ export class WebSocketManager {
       case 'output:chat:interrupted':
         this.emit('chat:interrupted', message.data)
         break
+      case 'output:audio:segment':
+        this.emit('audio:segment', message.data)
+        break
+      case 'output:audio:complete':
+        this.emit('audio:complete', message.data)
+        break
+      case 'output:audio:error':
+        this.emit('audio:error', message.data)
+        break
       case 'output:asr:transcript':
         this.emit('asr:transcript', message.data)
         break

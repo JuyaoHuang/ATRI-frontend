@@ -5,6 +5,7 @@ import type {
   TTSConfig,
   TTSProviderConfig,
   TTSProviderStatus,
+  TTSStreamingConfig,
   TTSSynthesisRequest,
   TTSVoiceInfo
 } from '@/api/types'
@@ -15,6 +16,13 @@ const DEFAULT_CONFIG: TTSConfig = {
   auto_play: false,
   show_player_on_home: false,
   volume: 1,
+  streaming: {
+    enabled: false,
+    segment_method: 'pysbd',
+    faster_first_response: true,
+    max_concurrent_synthesis: 2,
+    max_pending_segments: 12
+  },
   edge_tts: {
     voice: 'zh-CN-XiaoxiaoNeural',
     rate: '+0%'
@@ -55,9 +63,14 @@ function cloneConfig(config: TTSConfig): TTSConfig {
 }
 
 function normalizeConfig(config?: Partial<TTSConfig>): TTSConfig {
+  const streaming = config?.streaming as Partial<TTSStreamingConfig> | undefined
   return {
     ...cloneConfig(DEFAULT_CONFIG),
     ...(config || {}),
+    streaming: {
+      ...DEFAULT_CONFIG.streaming,
+      ...(streaming || {})
+    },
     edge_tts: {
       ...DEFAULT_CONFIG.edge_tts,
       ...(config?.edge_tts || {})
@@ -122,6 +135,10 @@ export const useTTSStore = defineStore('tts', {
 
     autoPlayEnabled(state): boolean {
       return Boolean(state.config.auto_play)
+    },
+
+    streamingAutoPlayEnabled(state): boolean {
+      return Boolean(state.config.enabled && state.config.auto_play && state.config.streaming?.enabled)
     },
 
     showPlayerOnHome(state): boolean {

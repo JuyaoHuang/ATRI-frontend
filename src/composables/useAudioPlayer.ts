@@ -7,15 +7,33 @@ interface QueueItem {
   id: string
   text: string
   url: string
-  source: 'auto' | 'manual' | 'test'
+  source: 'auto' | 'manual' | 'test' | 'stream'
   generationId?: string
-  vadInterruptedAtWhenQueued?: number | null
+  segmentId?: string
+  sequence?: number
+  mediaType?: string
+  discardedAtWhenQueued?: number | null
 }
 
 interface EnqueueOptions {
-  source?: QueueItem['source']
+  source?: Exclude<QueueItem['source'], 'stream'>
   voiceId?: string
   generationId?: string
+}
+
+interface AudioSegmentOptions {
+  generationId: string
+  segmentId: string
+  sequence: number
+  text: string
+  audio: Blob
+  mediaType: string
+}
+
+interface StreamedAudioGenerationState {
+  seenSequences: Set<number>
+  completed: boolean
+  updatedAt: number
 }
 
 const queue = ref<QueueItem[]>([])
@@ -26,12 +44,14 @@ const duration = ref(0)
 const error = ref<string | null>(null)
 let audio: HTMLAudioElement | null = null
 
-// Keep VAD-interrupted ids long enough to reject late TTS results.
-const VAD_INTERRUPTED_GENERATION_TTL_MS = 5 * 60 * 1000
-const MAX_VAD_INTERRUPTED_GENERATIONS = 100
-const vadInterruptedGenerationIds = new Map<string, number>()
+// Keep discarded ids long enough to reject late TTS results.
+const DISCARDED_GENERATION_TTL_MS = 5 * 60 * 1000
+const MAX_DISCARDED_GENERATIONS = 100
+const MAX_STREAMED_AUDIO_GENERATIONS = 100
+const discardedGenerationIds = new Map<string, number>()
 const activeSynthesisGenerationIds = new Set<string>()
-let vadInterruptEpoch = 0
+const streamedAudioGenerationStates = new Map<string, StreamedAudioGenerationState>()
+let discardEpoch = 0
 
 function finiteTime(value: number) {
   return Number.isFinite(value) && value > 0 ? value : 0
@@ -80,53 +100,90 @@ function revokeItem(item: QueueItem | null) {
   }
 }
 
-function pruneVadInterruptedGenerations(now = Date.now()) {
-  for (const [generationId, interruptedAt] of vadInterruptedGenerationIds) {
-    if (now - interruptedAt > VAD_INTERRUPTED_GENERATION_TTL_MS) {
-      vadInterruptedGenerationIds.delete(generationId)
+function pruneDiscardedGenerations(now = Date.now()) {
+  for (const [generationId, discardedAt] of discardedGenerationIds) {
+    if (now - discardedAt > DISCARDED_GENERATION_TTL_MS) {
+      discardedGenerationIds.delete(generationId)
     }
   }
 
-  const overflow = vadInterruptedGenerationIds.size - MAX_VAD_INTERRUPTED_GENERATIONS
+  const overflow = discardedGenerationIds.size - MAX_DISCARDED_GENERATIONS
   if (overflow <= 0) {
     return
   }
 
-  Array.from(vadInterruptedGenerationIds.keys())
+  Array.from(discardedGenerationIds.keys())
     .slice(0, overflow)
-    .forEach(generationId => vadInterruptedGenerationIds.delete(generationId))
+    .forEach(generationId => discardedGenerationIds.delete(generationId))
 }
 
-function markVadGenerationInterrupted(generationId: string) {
-  pruneVadInterruptedGenerations()
-  if (vadInterruptedGenerationIds.has(generationId)) {
-    vadInterruptedGenerationIds.delete(generationId)
+function markGenerationDiscarded(generationId: string) {
+  pruneDiscardedGenerations()
+  if (discardedGenerationIds.has(generationId)) {
+    discardedGenerationIds.delete(generationId)
   }
-  vadInterruptedGenerationIds.set(generationId, Date.now())
+  discardedGenerationIds.set(generationId, Date.now())
 }
 
-function bumpVadInterruptEpoch() {
-  vadInterruptEpoch += 1
+function pruneStreamedAudioGenerations() {
+  const overflow = streamedAudioGenerationStates.size - MAX_STREAMED_AUDIO_GENERATIONS
+  if (overflow <= 0) {
+    return
+  }
+
+  Array.from(streamedAudioGenerationStates.entries())
+    .sort(([, left], [, right]) => left.updatedAt - right.updatedAt)
+    .slice(0, overflow)
+    .forEach(([generationId]) => streamedAudioGenerationStates.delete(generationId))
 }
 
-function getVadGenerationInterruptedAt(generationId?: string) {
+function getStreamedAudioGenerationState(generationId: string) {
+  pruneStreamedAudioGenerations()
+  let state = streamedAudioGenerationStates.get(generationId)
+  if (!state) {
+    state = {
+      seenSequences: new Set<number>(),
+      completed: false,
+      updatedAt: Date.now()
+    }
+    streamedAudioGenerationStates.set(generationId, state)
+  }
+  state.updatedAt = Date.now()
+  return state
+}
+
+function markStreamSequenceSeen(generationId: string, sequence: number) {
+  const state = getStreamedAudioGenerationState(generationId)
+  if (state.seenSequences.has(sequence)) {
+    return false
+  }
+  state.seenSequences.add(sequence)
+  state.completed = false
+  return true
+}
+
+function bumpDiscardEpoch() {
+  discardEpoch += 1
+}
+
+function getGenerationDiscardedAt(generationId?: string) {
   if (!generationId) {
     return null
   }
-  pruneVadInterruptedGenerations()
-  return vadInterruptedGenerationIds.get(generationId) ?? null
+  pruneDiscardedGenerations()
+  return discardedGenerationIds.get(generationId) ?? null
 }
 
-function shouldSkipInterruptedQueueItem(item: QueueItem) {
-  const interruptedAt = getVadGenerationInterruptedAt(item.generationId)
+function shouldSkipDiscardedQueueItem(item: QueueItem) {
+  const discardedAt = getGenerationDiscardedAt(item.generationId)
   if (item.source !== 'manual') {
-    return interruptedAt !== null
+    return discardedAt !== null
   }
 
-  return interruptedAt !== null && interruptedAt !== item.vadInterruptedAtWhenQueued
+  return discardedAt !== null && discardedAt !== item.discardedAtWhenQueued
 }
 
-function markCurrentVadGenerationsInterrupted() {
+function markActiveGenerationsDiscarded() {
   const generationIds = new Set<string>()
   if (current.value?.generationId) {
     generationIds.add(current.value.generationId)
@@ -137,7 +194,8 @@ function markCurrentVadGenerationsInterrupted() {
     }
   })
   activeSynthesisGenerationIds.forEach(generationId => generationIds.add(generationId))
-  generationIds.forEach(markVadGenerationInterrupted)
+  streamedAudioGenerationStates.forEach((_state, generationId) => generationIds.add(generationId))
+  generationIds.forEach(markGenerationDiscarded)
 }
 
 function errorMessage(value: unknown): string {
@@ -153,7 +211,7 @@ async function playNext() {
   if (!item) {
     return
   }
-  if (shouldSkipInterruptedQueueItem(item)) {
+  if (shouldSkipDiscardedQueueItem(item)) {
     revokeItem(item)
     void playNext()
     return
@@ -201,9 +259,9 @@ export function useAudioPlayer() {
 
     const source = options.source || 'manual'
     const generationId = options.generationId
-    const vadInterruptEpochBeforeSynthesis = vadInterruptEpoch
-    const vadInterruptedAtBeforeSynthesis = getVadGenerationInterruptedAt(generationId)
-    if (source === 'auto' && vadInterruptedAtBeforeSynthesis !== null) {
+    const discardEpochBeforeSynthesis = discardEpoch
+    const generationDiscardedAtBeforeSynthesis = getGenerationDiscardedAt(generationId)
+    if (source === 'auto' && generationDiscardedAtBeforeSynthesis !== null) {
       return
     }
 
@@ -235,17 +293,17 @@ export function useAudioPlayer() {
       }
     }
 
-    const vadInterruptedAtAfterSynthesis = getVadGenerationInterruptedAt(generationId)
-    if (source === 'manual' && vadInterruptEpoch !== vadInterruptEpochBeforeSynthesis) {
+    const generationDiscardedAtAfterSynthesis = getGenerationDiscardedAt(generationId)
+    if (source === 'manual' && discardEpoch !== discardEpochBeforeSynthesis) {
       return
     }
-    if (source === 'auto' && vadInterruptedAtAfterSynthesis !== null) {
+    if (source === 'auto' && generationDiscardedAtAfterSynthesis !== null) {
       return
     }
     if (
       source === 'manual'
-      && vadInterruptedAtAfterSynthesis !== null
-      && vadInterruptedAtAfterSynthesis !== vadInterruptedAtBeforeSynthesis
+      && generationDiscardedAtAfterSynthesis !== null
+      && generationDiscardedAtAfterSynthesis !== generationDiscardedAtBeforeSynthesis
     ) {
       return
     }
@@ -255,11 +313,67 @@ export function useAudioPlayer() {
       text: normalizedText,
       source,
       generationId,
-      vadInterruptedAtWhenQueued: source === 'manual' ? vadInterruptedAtAfterSynthesis : undefined,
+      discardedAtWhenQueued: source === 'manual' ? generationDiscardedAtAfterSynthesis : undefined,
       url: URL.createObjectURL(blob)
     }
     queue.value.push(item)
     await playNext()
+  }
+
+  async function enqueueAudioSegment(segment: AudioSegmentOptions) {
+    const generationId = segment.generationId.trim()
+    const sequence = Number(segment.sequence)
+    if (!generationId || !Number.isInteger(sequence) || sequence < 0) {
+      return
+    }
+    if (getGenerationDiscardedAt(generationId) !== null) {
+      return
+    }
+    if (!markStreamSequenceSeen(generationId, sequence)) {
+      return
+    }
+
+    const item: QueueItem = {
+      id: `tts_stream_${generationId}_${sequence}_${segment.segmentId}`,
+      text: segment.text.trim(),
+      source: 'stream',
+      generationId,
+      segmentId: segment.segmentId,
+      sequence,
+      mediaType: segment.mediaType,
+      url: URL.createObjectURL(segment.audio)
+    }
+
+    if (shouldSkipDiscardedQueueItem(item)) {
+      revokeItem(item)
+      return
+    }
+
+    queue.value.push(item)
+    await playNext()
+  }
+
+  function skipAudioSegment(generationId: string, sequence: number) {
+    if (!generationId || !Number.isInteger(sequence) || sequence < 0) {
+      return
+    }
+    markStreamSequenceSeen(generationId, sequence)
+  }
+
+  function completeAudioGeneration(generationId: string) {
+    if (!generationId) {
+      return
+    }
+    const state = getStreamedAudioGenerationState(generationId)
+    state.completed = true
+    state.updatedAt = Date.now()
+  }
+
+  function trackAudioGeneration(generationId: string) {
+    if (!generationId || getGenerationDiscardedAt(generationId) !== null) {
+      return
+    }
+    getStreamedAudioGenerationState(generationId)
   }
 
   function pause() {
@@ -297,8 +411,9 @@ export function useAudioPlayer() {
     resetPlaybackPosition()
   }
 
-  function vadInterruptGeneration(generationId: string) {
-    markVadGenerationInterrupted(generationId)
+  function discardGenerationAudio(generationId: string) {
+    markGenerationDiscarded(generationId)
+    streamedAudioGenerationStates.delete(generationId)
     queue.value = queue.value.filter(item => {
       if (item.generationId !== generationId) {
         return true
@@ -311,18 +426,27 @@ export function useAudioPlayer() {
     }
   }
 
-  function vadInterruptActiveGeneration() {
-    markCurrentVadGenerationsInterrupted()
+  function vadInterruptGeneration(generationId: string) {
+    discardGenerationAudio(generationId)
+  }
+
+  function discardActiveAudio(generationId?: string) {
+    bumpDiscardEpoch()
+    if (generationId) {
+      discardGenerationAudio(generationId)
+    } else {
+      markActiveGenerationsDiscarded()
+    }
+    stop()
+  }
+
+  function stopBecauseContextChanged() {
+    // Chat or character changed; queued TTS belongs to the previous context.
+    discardActiveAudio()
   }
 
   function vadInterruptPlayback(generationId?: string) {
-    bumpVadInterruptEpoch()
-    if (generationId) {
-      vadInterruptGeneration(generationId)
-    } else {
-      vadInterruptActiveGeneration()
-    }
-    stop()
+    discardActiveAudio(generationId)
   }
 
   function seek(time: number) {
@@ -349,11 +473,16 @@ export function useAudioPlayer() {
     canSeek: computed(() => Boolean(current.value) && duration.value > 0),
     error: computed(() => error.value || ttsStore.error),
     enqueueText,
+    enqueueAudioSegment,
+    skipAudioSegment,
+    completeAudioGeneration,
+    trackAudioGeneration,
     pause,
     resume,
     stop,
+    stopBecauseContextChanged,
+    discardGenerationAudio,
     vadInterruptGeneration,
-    vadInterruptActiveGeneration,
     vadInterruptPlayback,
     seek
   }
