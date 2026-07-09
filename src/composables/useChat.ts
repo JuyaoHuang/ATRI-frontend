@@ -64,6 +64,7 @@ export function useChat() {
     const clientContext = buildClientContext(sentAt)
     const currentCharacterId = charactersStore.activeCharacterId || chatStore.currentCharacterId
     let currentChatId = chatStore.currentChatId
+    let deferredTitleSeed: string | null = null
 
     if (!currentCharacterId) {
       console.error('No character selected')
@@ -82,10 +83,9 @@ export function useChat() {
         })
         chatsStore.replaceDraftChat(draftChat.id, newChat)
         chatStore.markSkipNextHistoryLoad(newChat.id)
-        chatStore.markPendingDeferredTitle(newChat.id)
         chatStore.replaceCurrentChatId(draftChat.id, newChat.id)
         chatStore.setCurrentCharacter(currentCharacterId)
-        chatsStore.watchDeferredTitle(newChat.id, currentCharacterId, draftChat.title)
+        deferredTitleSeed = draftChat.title
         currentChatId = newChat.id
       } catch (error) {
         console.error('自动创建聊天失败:', error)
@@ -95,6 +95,12 @@ export function useChat() {
         return false
       }
     }
+
+    audioPlayer.stopBecauseContextChanged()
+    chatStore.beginStreaming({
+      chatId: currentChatId,
+      characterId: currentCharacterId
+    })
 
     const sent = sendText({
       text: messageText,
@@ -109,18 +115,17 @@ export function useChat() {
       return false
     }
 
+    if (deferredTitleSeed) {
+      chatStore.markPendingDeferredTitle(currentChatId)
+      chatsStore.watchDeferredTitle(currentChatId, currentCharacterId, deferredTitleSeed)
+    }
+
     chatStore.addMessage({
       id: `msg_${Date.now()}`,
       chat_id: currentChatId,
       role: 'human',
       content: messageText,
       timestamp: sentAtIso
-    })
-
-    audioPlayer.stopBecauseContextChanged()
-    chatStore.beginStreaming({
-      chatId: currentChatId,
-      characterId: currentCharacterId
     })
     return true
   }
