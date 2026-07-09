@@ -32,10 +32,11 @@ const disabledReason = computed(() => {
   if (!activeChatId.value) {
     return 'Open a saved chat first'
   }
+  if (!wsStore.connected) {
+    return 'WebSocket disconnected'
+  }
   return ''
 })
-
-const connectionHint = computed(() => !wsStore.connected ? 'WebSocket disconnected' : '')
 
 const isDisabled = computed(() => realtimeVoiceInput.isStarting.value || (!realtimeVoiceInput.isListening.value && !!disabledReason.value))
 
@@ -51,7 +52,7 @@ const buttonTitle = computed(() => {
       ? 'Speech detected'
       : 'Realtime voice listening'
   }
-  return disabledReason.value || connectionHint.value || 'Start realtime voice'
+  return disabledReason.value || 'Start realtime voice'
 })
 
 const buttonClass = computed(() => {
