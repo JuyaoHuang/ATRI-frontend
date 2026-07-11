@@ -99,6 +99,70 @@ describe('WebSocketSessionController vision protocol', () => {
     controller.disconnect()
   })
 
+  it('drops an oversized text attachment and sends the text exactly once', () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    const controller = new WebSocketSessionController()
+    controller.connect('ws://localhost/ws')
+    const socket = FakeWebSocket.instances[0]!
+    const textOnlyMessage = {
+      type: 'input:text',
+      data: {
+        text: '请只发送文字',
+        chat_id: 'chat-a',
+        character_id: 'atri'
+      }
+    }
+    const textOnlyBytes = new TextEncoder().encode(JSON.stringify(textOnlyMessage)).byteLength
+
+    expect(controller.sendText({
+      text: '请只发送文字',
+      chatId: 'chat-a',
+      characterId: 'atri',
+      image: {
+        source: 'screen',
+        media_type: 'image/jpeg',
+        encoding: 'base64',
+        data: 'x'.repeat(512)
+      },
+      maxMessageBytes: textOnlyBytes
+    })).toBe(true)
+
+    expect(socket.sent).toHaveLength(1)
+    expect(JSON.parse(socket.sent[0]!)).toEqual(textOnlyMessage)
+    controller.disconnect()
+  })
+
+  it('converts an oversized VAD capture result into a failed result', () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    const controller = new WebSocketSessionController()
+    controller.connect('ws://localhost/ws')
+    const socket = FakeWebSocket.instances[0]!
+    const failedMessage = {
+      type: 'input:vision:capture-result',
+      data: {
+        generation_id: 'gen-a',
+        status: 'failed'
+      }
+    }
+    const failedBytes = new TextEncoder().encode(JSON.stringify(failedMessage)).byteLength
+
+    expect(controller.sendVisionCaptureResult({
+      generationId: 'gen-a',
+      status: 'captured',
+      image: {
+        source: 'screen',
+        media_type: 'image/jpeg',
+        encoding: 'base64',
+        data: 'x'.repeat(512)
+      },
+      maxMessageBytes: failedBytes
+    })).toBe(true)
+
+    expect(socket.sent).toHaveLength(1)
+    expect(JSON.parse(socket.sent[0]!)).toEqual(failedMessage)
+    controller.disconnect()
+  })
+
   it('keeps generation failures separate from top-level protocol errors', () => {
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
     const controller = new WebSocketSessionController()

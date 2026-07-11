@@ -16,6 +16,7 @@ export interface SendTextPayload {
   characterId: string
   clientContext?: unknown
   image?: InputImage
+  maxMessageBytes?: number
 }
 
 export interface SendAudioChunkPayload {
@@ -92,6 +93,7 @@ export interface SendVisionCaptureResultPayload {
   generationId: string
   status: VisionCaptureStatus
   image?: InputImage
+  maxMessageBytes?: number
 }
 
 export interface AudioSegmentData {

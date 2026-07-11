@@ -57,6 +57,14 @@ describe('useVision module setting', () => {
     expect(stop).toHaveBeenCalledOnce()
   })
 
+  it('keeps text-only submission independent from a failed vision config load', async () => {
+    vi.mocked(visionApi.getConfig).mockRejectedValue(new Error('vision endpoint unavailable'))
+
+    await expect(useVision().captureForSubmission()).resolves.toBeUndefined()
+
+    expect(visionApi.getConfig).not.toHaveBeenCalled()
+  })
+
   it('keeps both the confirmed setting and runtime when the PUT fails', async () => {
     vi.mocked(visionApi.updateEnabled).mockRejectedValue(new Error('network details'))
     const store = useVisionStore()

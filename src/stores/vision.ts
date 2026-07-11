@@ -62,6 +62,7 @@ export const useVisionStore = defineStore('vision', {
   getters: {
     moduleEnabled: state => state.config.enabled,
     runtimeActive: state => state.runtimeStatus === 'active',
+    websocketMaxMessageBytes: state => state.config.transport.websocket_max_message_bytes,
     captureConfig(state): ScreenCaptureConfig {
       return {
         jpegQuality: state.config.capture.jpeg_quality,

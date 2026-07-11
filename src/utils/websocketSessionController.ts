@@ -68,7 +68,7 @@ export class WebSocketSessionController {
   }
 
   sendText(payload: SendTextPayload) {
-    return this.sendRaw({
+    let message = {
       type: 'input:text',
       data: {
         text: payload.text,
@@ -77,7 +77,14 @@ export class WebSocketSessionController {
         client_context: payload.clientContext,
         image: payload.image
       }
-    })
+    }
+    if (payload.image && !messageWithinByteLimit(message, payload.maxMessageBytes)) {
+      message = {
+        ...message,
+        data: { ...message.data, image: undefined }
+      }
+    }
+    return this.sendRaw(message)
   }
 
   sendVisionState(payload: SendVisionStatePayload) {
@@ -91,14 +98,25 @@ export class WebSocketSessionController {
   }
 
   sendVisionCaptureResult(payload: SendVisionCaptureResultPayload) {
-    return this.sendRaw({
+    let message = {
       type: 'input:vision:capture-result',
       data: {
         generation_id: payload.generationId,
         status: payload.status,
-        image: payload.image
+        image: payload.status === 'captured' ? payload.image : undefined
       }
-    })
+    }
+    if (payload.image && !messageWithinByteLimit(message, payload.maxMessageBytes)) {
+      message = {
+        ...message,
+        data: {
+          generation_id: payload.generationId,
+          status: 'failed',
+          image: undefined
+        }
+      }
+    }
+    return this.sendRaw(message)
   }
 
   sendAudioChunk(payload: SendAudioChunkPayload) {
@@ -282,3 +300,15 @@ export class WebSocketSessionController {
 }
 
 export const websocketSessionController = new WebSocketSessionController()
+
+function messageWithinByteLimit(message: unknown, maxMessageBytes?: number): boolean {
+  if (
+    typeof maxMessageBytes !== 'number'
+    || !Number.isSafeInteger(maxMessageBytes)
+    || maxMessageBytes <= 0
+  ) {
+    return true
+  }
+  const serialized = JSON.stringify(message)
+  return new TextEncoder().encode(serialized).byteLength <= maxMessageBytes
+}

@@ -51,7 +51,7 @@ export function useChat() {
   const charactersStore = useCharactersStore()
   const live2dStore = useLive2dStore()
   const audioPlayer = useAudioPlayer()
-  const { captureForSubmission } = useVision()
+  const { captureForSubmission, websocketMaxMessageBytes } = useVision()
 
   const sendMessage = async (text: string) => {
     if (!text.trim()) return false
@@ -118,7 +118,8 @@ export function useChat() {
         chatId: currentChatId,
         characterId: currentCharacterId,
         clientContext,
-        image
+        image,
+        maxMessageBytes: websocketMaxMessageBytes.value
       })
 
       if (!sent) {

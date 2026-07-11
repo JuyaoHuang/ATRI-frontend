@@ -59,6 +59,9 @@ export function useVision() {
   }
 
   const captureCurrentFrame = async (): Promise<VisionCaptureOutcome> => {
+    if (!visionSessionController.isActive()) {
+      return { status: 'unavailable' }
+    }
     await ensureLoaded()
     if (!visionStore.moduleEnabled) {
       return { status: 'unavailable' }
@@ -77,6 +80,7 @@ export function useVision() {
     runtimeStatus: computed(() => visionStore.runtimeStatus),
     runtimeError: computed(() => visionStore.runtimeError),
     runtimeActive: computed(() => visionStore.runtimeActive),
+    websocketMaxMessageBytes: computed(() => visionStore.websocketMaxMessageBytes),
     loading: computed(() => visionStore.loading),
     saving: computed(() => visionStore.saving),
     error: computed(() => visionStore.error),
@@ -143,6 +147,7 @@ async function respondToCaptureRequest(
   websocket.sendVisionCaptureResult({
     generationId,
     status: result.status,
-    image: result.status === 'captured' ? result.image : undefined
+    image: result.status === 'captured' ? result.image : undefined,
+    maxMessageBytes: visionStore.websocketMaxMessageBytes
   })
 }
