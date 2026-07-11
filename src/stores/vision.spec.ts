@@ -64,4 +64,16 @@ describe('vision store', () => {
       'error'
     ])
   })
+
+  it('preserves the last confirmed config when an update fails', async () => {
+    const store = useVisionStore()
+    store.applyConfig(CONFIG)
+    vi.mocked(visionApi.updateEnabled).mockRejectedValue(new Error('private response'))
+
+    await expect(store.updateEnabled(false)).rejects.toThrow('private response')
+
+    expect(store.moduleEnabled).toBe(true)
+    expect(store.error).toBe('无法读取或保存视觉配置。')
+    expect(store.error).not.toContain('private response')
+  })
 })
