@@ -1,7 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, useId } from 'vue'
 
+import { useAutoDismissVisibility } from '@/composables/useAutoDismissVisibility'
 import { useVision } from '@/composables/useVision'
+
+const RUNTIME_ERROR_VISIBLE_DURATION_MS = 2000
 
 const {
   ensureLoaded,
@@ -24,6 +27,15 @@ const screenShareSupported = computed(() => (
 
 const isStarting = computed(() => runtimeStatus.value === 'starting')
 const hasRuntimeError = computed(() => runtimeStatus.value === 'error' && !!runtimeError.value)
+const runtimeErrorNotice = computed(() => (
+  hasRuntimeError.value && moduleEnabled.value && screenShareSupported.value
+    ? runtimeError.value
+    : null
+))
+const showRuntimeErrorNotice = useAutoDismissVisibility(
+  runtimeErrorNotice,
+  RUNTIME_ERROR_VISIBLE_DURATION_MS,
+)
 const isDisabled = computed(() => (
   !loaded.value
   || loading.value
@@ -123,7 +135,7 @@ onMounted(() => {
       :aria-label="buttonTitle"
       :aria-pressed="runtimeActive"
       :aria-busy="isStarting"
-      :aria-describedby="hasRuntimeError ? errorId : undefined"
+      :aria-describedby="showRuntimeErrorNotice ? errorId : undefined"
       :disabled="isDisabled"
       @click="toggleVision"
     >
@@ -135,13 +147,31 @@ onMounted(() => {
       />
     </button>
 
-    <div
-      v-if="hasRuntimeError && moduleEnabled && screenShareSupported"
-      :id="errorId"
-      class="pointer-events-none absolute bottom-10 left-1/2 z-30 w-64 rounded-lg border border-red-200/70 bg-red-50/95 p-2 text-xs text-red-700 shadow-lg backdrop-blur-md -translate-x-1/2 dark:border-red-800/60 dark:bg-red-950/90 dark:text-red-200"
-      role="status"
-    >
-      {{ runtimeError }} 点击视觉按钮可重新尝试。
-    </div>
+    <Transition name="vision-runtime-error">
+      <div
+        v-if="showRuntimeErrorNotice"
+        :id="errorId"
+        class="pointer-events-none absolute bottom-10 left-1/2 z-30 w-64 rounded-lg border border-red-200/70 bg-red-50/95 p-2 text-xs text-red-700 shadow-lg backdrop-blur-md -translate-x-1/2 dark:border-red-800/60 dark:bg-red-950/90 dark:text-red-200"
+        role="status"
+      >
+        {{ runtimeError }} 点击视觉按钮可重新尝试。
+      </div>
+    </Transition>
   </div>
 </template>
+
+<style scoped>
+.vision-runtime-error-leave-active {
+  transition: opacity 300ms ease;
+}
+
+.vision-runtime-error-leave-to {
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .vision-runtime-error-leave-active {
+    transition-duration: 1ms;
+  }
+}
+</style>
