@@ -135,6 +135,23 @@ describe('WebSocketSessionController vision protocol', () => {
     controller.disconnect()
   })
 
+  it('rejects an oversized text-only frame before writing to the socket', () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    const controller = new WebSocketSessionController()
+    controller.connect('ws://localhost/ws')
+    const socket = FakeWebSocket.instances[0]!
+
+    expect(controller.sendText({
+      text: '过长文本',
+      chatId: 'chat-a',
+      characterId: 'atri',
+      requestId: 'request-a',
+      maxMessageBytes: 1
+    })).toBe(false)
+    expect(socket.sent).toHaveLength(0)
+    controller.disconnect()
+  })
+
   it('converts an oversized VAD capture result into a failed result', () => {
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
     const controller = new WebSocketSessionController()

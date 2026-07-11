@@ -85,6 +85,9 @@ export class WebSocketSessionController {
         data: { ...message.data, image: undefined }
       }
     }
+    if (!messageWithinByteLimit(message, payload.maxMessageBytes)) {
+      return false
+    }
     return this.sendRaw(message)
   }
 
