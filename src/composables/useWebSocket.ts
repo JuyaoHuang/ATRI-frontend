@@ -331,7 +331,8 @@ function ensureDefaultHandlers(deps: {
     chatStore.markActiveStreamInterrupted({
       chatId: interruptData?.chat_id,
       characterId: interruptData?.character_id,
-      generationId: interruptData?.generation_id
+      generationId: interruptData?.generation_id,
+      preserveChatGeneration: interruptData?.preserve_chat_generation
     })
   })
 }

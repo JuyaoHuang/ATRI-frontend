@@ -304,7 +304,11 @@ export const useChatStore = defineStore('chat', {
       chatId?: string
       characterId?: string
       generationId?: string
+      preserveChatGeneration?: boolean
     }): GenerationApplyResult {
+      if (payload.preserveChatGeneration) {
+        return 'ignored'
+      }
       if (!this.matchesActiveStream(payload, { requireCharacter: false })) {
         return 'ignored'
       }

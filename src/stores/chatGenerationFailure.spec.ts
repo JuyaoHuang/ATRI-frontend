@@ -88,6 +88,28 @@ describe('chat generation failure', () => {
     expect(store.timelineItems).toHaveLength(0)
   })
 
+  it('preserves a generation whose durable commit already won', () => {
+    const store = useChatStore()
+    store.setCurrentChat('chat-a', 'atri')
+    store.beginStreaming({
+      chatId: 'chat-a',
+      characterId: 'atri',
+      generationId: 'gen-committing'
+    })
+    store.streamingText = 'complete reply'
+
+    expect(store.markActiveStreamInterrupted({
+      chatId: 'chat-a',
+      characterId: 'atri',
+      generationId: 'gen-committing',
+      preserveChatGeneration: true
+    })).toBe('ignored')
+
+    expect(store.activeStream?.generationId).toBe('gen-committing')
+    expect(store.streamingText).toBe('complete reply')
+    expect(store.pendingInterruptedStream).toBeNull()
+  })
+
   it('ends a hidden generation without adding a notice to another chat', () => {
     const store = useChatStore()
     store.setCurrentChat('chat-visible', 'atri')

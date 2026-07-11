@@ -128,6 +128,7 @@ export interface InterruptData {
   character_id?: string
   generation_id?: string
   reason?: string
+  preserve_chat_generation?: boolean
 }
 
 export interface VadListenStateData {
