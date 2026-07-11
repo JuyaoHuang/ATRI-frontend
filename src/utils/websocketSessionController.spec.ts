@@ -98,4 +98,41 @@ describe('WebSocketSessionController vision protocol', () => {
 
     controller.disconnect()
   })
+
+  it('keeps generation failures separate from top-level protocol errors', () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
+    const controller = new WebSocketSessionController()
+    const generationErrors: string[] = []
+    const protocolErrors: string[] = []
+    controller.on('chat:generation-error', error => {
+      if (error.generation_id) generationErrors.push(error.generation_id)
+    })
+    controller.on('chat:error', error => {
+      if (error.message) protocolErrors.push(error.message)
+    })
+    controller.connect('ws://localhost/ws')
+    const socket = FakeWebSocket.instances[0]!
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'output:chat:error',
+        data: {
+          message: 'generation failed',
+          chat_id: 'chat-a',
+          character_id: 'atri',
+          generation_id: 'gen-a'
+        }
+      })
+    } as MessageEvent)
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'error',
+        data: { message: 'invalid protocol' }
+      })
+    } as MessageEvent)
+
+    expect(generationErrors).toEqual(['gen-a'])
+    expect(protocolErrors).toEqual(['invalid protocol'])
+    controller.disconnect()
+  })
 })
