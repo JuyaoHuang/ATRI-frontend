@@ -12,6 +12,7 @@ import {
   type AudioSegmentData,
   type ChatCompleteData,
   type ChatErrorData,
+  type ChatGenerationErrorData,
   type ChatInterruptedData,
   type ChatChunkData,
   type InterruptData,
@@ -231,10 +232,27 @@ function ensureDefaultHandlers(deps: {
 
   websocketSessionController.on('chat:error', (errorData: ChatErrorData) => {
     wsStore.setError(errorData.message || '对话错误')
-    chatStore.failActiveStream({
+  })
+
+  websocketSessionController.on('chat:generation-error', (errorData: ChatGenerationErrorData) => {
+    if (
+      !errorData.chat_id
+      || !errorData.character_id
+      || !errorData.generation_id
+      || !errorData.message
+    ) {
+      return
+    }
+
+    const result = chatStore.failActiveGeneration({
       chatId: errorData.chat_id,
-      generationId: errorData.generation_id
+      characterId: errorData.character_id,
+      generationId: errorData.generation_id,
+      failure: { message: errorData.message }
     })
+    if (result !== 'ignored') {
+      audioPlayer.discardGenerationAudio(errorData.generation_id)
+    }
   })
 
   websocketSessionController.on('audio:segment', (segmentData: AudioSegmentData) => {

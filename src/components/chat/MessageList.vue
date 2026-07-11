@@ -5,7 +5,7 @@ import { useChat } from '@/composables/useChat'
 import { useChatStore } from '@/stores/chat'
 import { useChatsStore } from '@/stores/chats'
 
-import MessageItem from './MessageItem.vue'
+import ChatTimelineItem from './ChatTimelineItem.vue'
 
 interface Props {
   variant?: 'default' | 'stage'
@@ -15,7 +15,7 @@ const props = withDefaults(defineProps<Props>(), {
   variant: 'default'
 })
 
-const { messages, streamingText, isStreaming } = useChat()
+const { timelineItems, streamingText, isStreaming } = useChat()
 const chatStore = useChatStore()
 const chatsStore = useChatsStore()
 const messageListRef = ref<HTMLElement | null>(null)
@@ -43,7 +43,7 @@ const scrollToBottom = () => {
   })
 }
 
-watch([messages, streamingText], () => {
+watch([timelineItems, streamingText], () => {
   scrollToBottom()
 })
 </script>
@@ -55,17 +55,17 @@ watch([messages, streamingText], () => {
     :class="{ 'stage-message-list': props.variant === 'stage' }"
   >
     <div
-      v-if="messages.length === 0 && !isStreaming"
+      v-if="timelineItems.length === 0 && !isStreaming"
       class="empty-state mt-20 text-center"
       :class="{ 'stage-empty-state': props.variant === 'stage' }"
     >
       <p class="text-lg">{{ emptyStateText }}</p>
     </div>
 
-    <MessageItem
-      v-for="message in messages"
-      :key="message.id"
-      :message="message"
+    <ChatTimelineItem
+      v-for="item in timelineItems"
+      :key="item.id"
+      :item="item"
       :variant="props.variant"
     />
 
