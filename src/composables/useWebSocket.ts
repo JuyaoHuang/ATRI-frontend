@@ -232,6 +232,13 @@ function ensureDefaultHandlers(deps: {
 
   websocketSessionController.on('chat:error', (errorData: ChatErrorData) => {
     wsStore.setError(errorData.message || '对话错误')
+    if (errorData.chat_id && errorData.request_id) {
+      chatStore.rejectPendingSubmission({
+        chatId: errorData.chat_id,
+        characterId: errorData.character_id,
+        requestId: errorData.request_id
+      })
+    }
   })
 
   websocketSessionController.on('chat:generation-error', (errorData: ChatGenerationErrorData) => {

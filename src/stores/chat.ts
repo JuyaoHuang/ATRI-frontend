@@ -8,6 +8,7 @@ import type {
 export interface ActiveStream {
   chatId: string
   characterId: string
+  requestId: string | null
   generationId: string | null
   status: 'pending' | 'streaming' | 'interrupted'
 }
@@ -144,11 +145,13 @@ export const useChatStore = defineStore('chat', {
     beginStreaming(payload: {
       chatId: string
       characterId: string
+      requestId?: string | null
       generationId?: string | null
     }) {
       this.activeStream = {
         chatId: payload.chatId,
         characterId: payload.characterId,
+        requestId: payload.requestId || null,
         generationId: payload.generationId || null,
         status: 'pending'
       }
@@ -396,6 +399,27 @@ export const useChatStore = defineStore('chat', {
         })
       }
       return visible ? 'visible' : 'hidden'
+    },
+
+    rejectPendingSubmission(payload: {
+      chatId: string
+      characterId?: string
+      requestId: string
+    }): GenerationApplyResult {
+      const stream = this.activeStream
+      if (
+        !stream
+        || stream.status !== 'pending'
+        || stream.chatId !== payload.chatId
+        || stream.requestId !== payload.requestId
+        || (payload.characterId && stream.characterId !== payload.characterId)
+      ) {
+        return 'ignored'
+      }
+
+      this.activeStream = null
+      this.streamingText = ''
+      return this.currentChatId === payload.chatId ? 'visible' : 'hidden'
     },
 
     clearActiveStream() {

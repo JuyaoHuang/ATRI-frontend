@@ -74,6 +74,7 @@ export class WebSocketSessionController {
         text: payload.text,
         chat_id: payload.chatId,
         character_id: payload.characterId,
+        request_id: payload.requestId,
         client_context: payload.clientContext,
         image: payload.image
       }

@@ -14,6 +14,7 @@ export interface SendTextPayload {
   text: string
   chatId: string
   characterId: string
+  requestId: string
   clientContext?: unknown
   image?: InputImage
   maxMessageBytes?: number
@@ -68,6 +69,7 @@ export interface ChatErrorData {
   chat_id?: string
   character_id?: string
   generation_id?: string
+  request_id?: string
 }
 
 export interface ChatGenerationErrorData {

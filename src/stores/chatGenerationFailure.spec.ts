@@ -110,6 +110,54 @@ describe('chat generation failure', () => {
     expect(store.pendingInterruptedStream).toBeNull()
   })
 
+  it('clears only the pending submission matched by request id', () => {
+    const store = useChatStore()
+    store.setCurrentChat('chat-a', 'atri')
+    store.beginStreaming({
+      chatId: 'chat-a',
+      characterId: 'atri',
+      requestId: 'request-a'
+    })
+
+    expect(store.rejectPendingSubmission({
+      chatId: 'chat-a',
+      characterId: 'atri',
+      requestId: 'request-b'
+    })).toBe('ignored')
+    expect(store.activeStream?.requestId).toBe('request-a')
+
+    expect(store.rejectPendingSubmission({
+      chatId: 'chat-a',
+      characterId: 'atri',
+      requestId: 'request-a'
+    })).toBe('visible')
+    expect(store.activeStream).toBeNull()
+  })
+
+  it('does not let a top-level rejection terminate a streaming generation', () => {
+    const store = useChatStore()
+    store.setCurrentChat('chat-a', 'atri')
+    store.beginStreaming({
+      chatId: 'chat-a',
+      characterId: 'atri',
+      requestId: 'request-a'
+    })
+    store.appendStreamingChunk({
+      chatId: 'chat-a',
+      characterId: 'atri',
+      generationId: 'gen-a',
+      chunk: 'partial'
+    })
+
+    expect(store.rejectPendingSubmission({
+      chatId: 'chat-a',
+      characterId: 'atri',
+      requestId: 'request-a'
+    })).toBe('ignored')
+    expect(store.activeStream?.generationId).toBe('gen-a')
+    expect(store.streamingText).toBe('partial')
+  })
+
   it('ends a hidden generation without adding a notice to another chat', () => {
     const store = useChatStore()
     store.setCurrentChat('chat-visible', 'atri')

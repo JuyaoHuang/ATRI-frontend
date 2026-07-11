@@ -59,6 +59,7 @@ describe('WebSocketSessionController vision protocol', () => {
       text: '请看屏幕',
       chatId: 'chat-a',
       characterId: 'atri',
+      requestId: 'request-a',
       image
     })).toBe(true)
     const textMessage = JSON.parse(socket.sent[0]!) as {
@@ -109,7 +110,8 @@ describe('WebSocketSessionController vision protocol', () => {
       data: {
         text: '请只发送文字',
         chat_id: 'chat-a',
-        character_id: 'atri'
+        character_id: 'atri',
+        request_id: 'request-a'
       }
     }
     const textOnlyBytes = new TextEncoder().encode(JSON.stringify(textOnlyMessage)).byteLength
@@ -118,6 +120,7 @@ describe('WebSocketSessionController vision protocol', () => {
       text: '请只发送文字',
       chatId: 'chat-a',
       characterId: 'atri',
+      requestId: 'request-a',
       image: {
         source: 'screen',
         media_type: 'image/jpeg',

@@ -107,16 +107,19 @@ export function useChat() {
       }
 
       const image = await captureForSubmission()
+      const requestId = createRequestId()
       audioPlayer.stopBecauseContextChanged()
       chatStore.beginStreaming({
         chatId: currentChatId,
-        characterId: currentCharacterId
+        characterId: currentCharacterId,
+        requestId
       })
 
       const sent = sendText({
         text: messageText,
         chatId: currentChatId,
         characterId: currentCharacterId,
+        requestId,
         clientContext,
         image,
         maxMessageBytes: websocketMaxMessageBytes.value
@@ -199,4 +202,11 @@ export function useChat() {
     sendMessage,
     loadHistory
   }
+}
+
+let requestSequence = 0
+
+function createRequestId(): string {
+  requestSequence += 1
+  return `request_${Date.now().toString(36)}_${requestSequence.toString(36)}`
 }
