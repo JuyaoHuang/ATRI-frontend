@@ -18,10 +18,28 @@ export function useVision() {
 
   ensureVisionHandlers(visionStore, websocket)
 
-  const ensureLoaded = () => visionStore.ensureLoaded()
+  const reconcileModuleState = (): void => {
+    if (
+      visionStore.loaded
+      && !visionStore.moduleEnabled
+      && visionSessionController.getSnapshot().status !== 'disabled'
+    ) {
+      visionSessionController.stop()
+    }
+  }
+
+  const loadConfig = async (): Promise<void> => {
+    await visionStore.load()
+    reconcileModuleState()
+  }
+
+  const ensureLoaded = async (): Promise<void> => {
+    await visionStore.ensureLoaded()
+    reconcileModuleState()
+  }
 
   const start = async (): Promise<boolean> => {
-    await visionStore.ensureLoaded()
+    await ensureLoaded()
     if (!visionStore.moduleEnabled) {
       visionStore.setRuntimeSnapshot('disabled')
       return false
@@ -33,8 +51,15 @@ export function useVision() {
     visionSessionController.stop()
   }
 
+  const updateModuleEnabled = async (enabled: boolean): Promise<void> => {
+    await visionStore.updateEnabled(enabled)
+    if (!visionStore.moduleEnabled) {
+      visionSessionController.stop()
+    }
+  }
+
   const captureCurrentFrame = async (): Promise<VisionCaptureOutcome> => {
-    await visionStore.ensureLoaded()
+    await ensureLoaded()
     if (!visionStore.moduleEnabled) {
       return { status: 'unavailable' }
     }
@@ -47,6 +72,7 @@ export function useVision() {
   }
 
   return {
+    loaded: computed(() => visionStore.loaded),
     moduleEnabled: computed(() => visionStore.moduleEnabled),
     runtimeStatus: computed(() => visionStore.runtimeStatus),
     runtimeError: computed(() => visionStore.runtimeError),
@@ -54,7 +80,9 @@ export function useVision() {
     loading: computed(() => visionStore.loading),
     saving: computed(() => visionStore.saving),
     error: computed(() => visionStore.error),
+    loadConfig,
     ensureLoaded,
+    updateModuleEnabled,
     start,
     stop,
     captureCurrentFrame,
