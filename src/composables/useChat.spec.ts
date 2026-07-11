@@ -23,7 +23,8 @@ vi.mock('@/composables/useWebSocket', () => ({
 
 vi.mock('@/composables/useVision', () => ({
   useVision: () => ({
-    captureForSubmission: mocks.captureForSubmission
+    captureForSubmission: mocks.captureForSubmission,
+    websocketMaxMessageBytes: { value: 8 * 1024 * 1024 }
   })
 }))
 
@@ -77,6 +78,8 @@ describe('useChat visual submission', () => {
     const payload = mocks.sendText.mock.calls[0]![0]
     expect(payload.text).toBe('first')
     expect(payload.image?.data.length).toBe(IMAGE.data.length)
+    expect(payload.requestId).toMatch(/^request_/)
+    expect(payload.maxMessageBytes).toBe(8 * 1024 * 1024)
   })
 
   it('sends text exactly once when local capture is unavailable', async () => {
