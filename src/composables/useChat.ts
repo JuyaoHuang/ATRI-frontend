@@ -9,6 +9,7 @@ import { useChatStore } from '@/stores/chat'
 import { useChatsStore } from '@/stores/chats'
 import { useLive2dStore } from '@/stores/live2d'
 import { useWebSocket } from '@/composables/useWebSocket'
+import type { ChatMessageItem } from '@/types/message'
 import { extractLive2dExpression } from '@/utils/live2dExpression'
 
 interface ClientDatetimeContext {
@@ -152,7 +153,7 @@ export function useChat() {
       }
 
       let lastAssistantExpression: string | null = null
-      chatStore.messages = response.messages.map((msg, index) => {
+      const historyItems: ChatMessageItem[] = response.messages.map((msg, index) => {
         // 如果是 AI 消息且有 name，从 characters store 获取 avatar
         let avatar: string | undefined
         let content = msg.content
@@ -167,6 +168,7 @@ export function useChat() {
         }
 
         return {
+          kind: 'message',
           id: `msg_${index}`,
           chat_id: chatId,
           role: msg.role,
@@ -179,6 +181,7 @@ export function useChat() {
           interrupt_reason: msg.interrupt_reason
         }
       })
+      chatStore.replaceTimelineItems(historyItems)
 
       live2dStore.requestExpression(lastAssistantExpression)
     } catch (error) {
@@ -188,6 +191,7 @@ export function useChat() {
 
   return {
     messages: computed(() => chatStore.messages),
+    timelineItems: computed(() => chatStore.timelineItems),
     isStreaming: computed(() => chatStore.isCurrentChatStreaming),
     connectionBusy: computed(() => chatStore.connectionBusy),
     streamingText: computed(() => chatStore.isCurrentChatStreaming ? chatStore.streamingText : ''),
