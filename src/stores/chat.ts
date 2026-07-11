@@ -20,6 +20,7 @@ export interface ChatState {
   skipNextHistoryLoadChatId: string | null
   pendingDeferredTitleChatId: string | null
   draftChatId: string | null
+  submissionPending: boolean
 }
 
 export const useChatStore = defineStore('chat', {
@@ -32,15 +33,28 @@ export const useChatStore = defineStore('chat', {
     pendingInterruptedStream: null,
     skipNextHistoryLoadChatId: null,
     pendingDeferredTitleChatId: null,
-    draftChatId: null
+    draftChatId: null,
+    submissionPending: false
   }),
 
   getters: {
-    connectionBusy: state => state.activeStream !== null,
+    connectionBusy: state => state.activeStream !== null || state.submissionPending,
     isCurrentChatStreaming: state => state.activeStream?.chatId === state.currentChatId
   },
 
   actions: {
+    reserveSubmission() {
+      if (this.submissionPending || this.activeStream) {
+        return false
+      }
+      this.submissionPending = true
+      return true
+    },
+
+    releaseSubmission() {
+      this.submissionPending = false
+    },
+
     setCurrentCharacter(characterId: string | null) {
       this.currentCharacterId = characterId
     },

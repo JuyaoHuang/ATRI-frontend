@@ -1,3 +1,5 @@
+import type { InputImage, VisionCaptureStatus, VisionSource } from '@/types/vision'
+
 export const ConnectionStatus = {
   IDLE: 'idle',
   CONNECTING: 'connecting',
@@ -13,6 +15,7 @@ export interface SendTextPayload {
   chatId: string
   characterId: string
   clientContext?: unknown
+  image?: InputImage
 }
 
 export interface SendAudioChunkPayload {
@@ -62,7 +65,33 @@ export interface ChatInterruptedData {
 export interface ChatErrorData {
   message?: string
   chat_id?: string
+  character_id?: string
   generation_id?: string
+}
+
+export interface ChatGenerationErrorData {
+  message?: string
+  chat_id?: string
+  character_id?: string
+  generation_id?: string
+}
+
+export interface VisionCaptureRequestData {
+  generation_id?: string
+  chat_id?: string
+  character_id?: string
+  source?: VisionSource
+}
+
+export interface SendVisionStatePayload {
+  enabled: boolean
+  source: VisionSource
+}
+
+export interface SendVisionCaptureResultPayload {
+  generationId: string
+  status: VisionCaptureStatus
+  image?: InputImage
 }
 
 export interface AudioSegmentData {
@@ -131,10 +160,12 @@ export interface WebSocketSessionEventMap {
   'chat:complete': ChatCompleteData
   'chat:interrupted': ChatInterruptedData
   'chat:error': ChatErrorData
+  'chat:generation-error': ChatGenerationErrorData
   'audio:segment': AudioSegmentData
   'audio:complete': AudioCompleteData
   'audio:error': AudioErrorData
   'asr:transcript': AsrTranscriptData
   'vad:listen-state': VadListenStateData
   'vad:interrupt': InterruptData | undefined
+  'vision:capture-request': VisionCaptureRequestData
 }

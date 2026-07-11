@@ -4,6 +4,8 @@ import {
   type SendAudioChunkPayload,
   type SendAudioEndPayload,
   type SendTextPayload,
+  type SendVisionCaptureResultPayload,
+  type SendVisionStatePayload,
   type WebSocketSessionEventMap
 } from '@/types/websocket'
 import { WebSocketManager } from '@/utils/websocket'
@@ -72,7 +74,29 @@ export class WebSocketSessionController {
         text: payload.text,
         chat_id: payload.chatId,
         character_id: payload.characterId,
-        client_context: payload.clientContext
+        client_context: payload.clientContext,
+        image: payload.image
+      }
+    })
+  }
+
+  sendVisionState(payload: SendVisionStatePayload) {
+    return this.sendRaw({
+      type: 'input:vision:state',
+      data: {
+        enabled: payload.enabled,
+        source: payload.source
+      }
+    })
+  }
+
+  sendVisionCaptureResult(payload: SendVisionCaptureResultPayload) {
+    return this.sendRaw({
+      type: 'input:vision:capture-result',
+      data: {
+        generation_id: payload.generationId,
+        status: payload.status,
+        image: payload.image
       }
     })
   }
@@ -186,6 +210,12 @@ export class WebSocketSessionController {
       case 'output:chat:interrupted':
         this.emit('chat:interrupted', message.data as WebSocketSessionEventMap['chat:interrupted'])
         break
+      case 'output:chat:error':
+        this.emit(
+          'chat:generation-error',
+          message.data as WebSocketSessionEventMap['chat:generation-error']
+        )
+        break
       case 'output:audio:segment':
         this.emit('audio:segment', message.data as WebSocketSessionEventMap['audio:segment'])
         break
@@ -203,6 +233,12 @@ export class WebSocketSessionController {
         break
       case 'control:interrupt':
         this.emit('vad:interrupt', message.data as WebSocketSessionEventMap['vad:interrupt'])
+        break
+      case 'control:vision:capture-request':
+        this.emit(
+          'vision:capture-request',
+          message.data as WebSocketSessionEventMap['vision:capture-request']
+        )
         break
       case 'error':
         this.emit('chat:error', message.data as WebSocketSessionEventMap['chat:error'])

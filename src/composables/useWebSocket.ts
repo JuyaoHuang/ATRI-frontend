@@ -20,6 +20,8 @@ import {
   type SendAudioChunkPayload,
   type SendAudioEndPayload,
   type SendTextPayload,
+  type SendVisionCaptureResultPayload,
+  type SendVisionStatePayload,
   type WebSocketSessionEventMap
 } from '@/types/websocket'
 import { extractLive2dExpression } from '@/utils/live2dExpression'
@@ -66,6 +68,12 @@ export function useWebSocket() {
   const sendAudioEnd = (payload: SendAudioEndPayload) =>
     websocketSessionController.sendAudioEnd(payload)
 
+  const sendVisionState = (payload: SendVisionStatePayload) =>
+    websocketSessionController.sendVisionState(payload)
+
+  const sendVisionCaptureResult = (payload: SendVisionCaptureResultPayload) =>
+    websocketSessionController.sendVisionCaptureResult(payload)
+
   const on = <K extends keyof WebSocketSessionEventMap>(
     event: K,
     listener: (payload: WebSocketSessionEventMap[K]) => void
@@ -91,6 +99,8 @@ export function useWebSocket() {
     sendText,
     sendAudioChunk,
     sendAudioEnd,
+    sendVisionState,
+    sendVisionCaptureResult,
     on,
     off
   }
