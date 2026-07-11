@@ -112,6 +112,26 @@ describe('VisionSessionController', () => {
     expect(runtime.track.stop).toHaveBeenCalledTimes(1)
   })
 
+  it('does not publish active before the shared video has a usable frame', async () => {
+    const runtime = createMediaRuntime()
+    runtime.video.videoWidth = 0
+    runtime.video.videoHeight = 0
+    const controller = new VisionSessionController({
+      getDisplayMedia: vi.fn(async () => runtime.stream as unknown as MediaStream),
+      createVideoElement: () => runtime.video as unknown as HTMLVideoElement,
+      captureFrame: vi.fn(async () => TEST_IMAGE)
+    })
+
+    expect(await controller.start()).toBe(false)
+    expect(controller.isActive()).toBe(false)
+    expect(controller.getSnapshot()).toEqual({
+      status: 'error',
+      error: '未获得可用的屏幕共享视频画面。'
+    })
+    expect(runtime.track.stop).toHaveBeenCalledTimes(1)
+    expect(runtime.video.srcObject).toBeNull()
+  })
+
   it('reports a safe permission error without retaining the original message', async () => {
     const error = Object.assign(new Error('private browser details'), { name: 'NotAllowedError' })
     const controller = new VisionSessionController({

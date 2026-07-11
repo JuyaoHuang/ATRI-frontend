@@ -41,6 +41,7 @@ export class VisionSessionController {
     return this.status.status === 'active'
       && this.track?.readyState === 'live'
       && this.video !== null
+      && hasUsableVideoFrame(this.video)
   }
 
   subscribe(listener: VisionRuntimeListener): () => void {
@@ -121,6 +122,11 @@ export class VisionSessionController {
         }
         return false
       }
+      if (!hasUsableVideoFrame(video)) {
+        this.releaseResources(true)
+        this.publish({ status: 'error', error: '未获得可用的屏幕共享视频画面。' })
+        return false
+      }
 
       this.publish({ status: 'active', error: null })
       return true
@@ -177,3 +183,10 @@ function screenShareErrorMessage(error: unknown): string {
 }
 
 export const visionSessionController = new VisionSessionController()
+
+function hasUsableVideoFrame(video: HTMLVideoElement): boolean {
+  return Number.isFinite(video.videoWidth)
+    && Number.isFinite(video.videoHeight)
+    && video.videoWidth > 0
+    && video.videoHeight > 0
+}
