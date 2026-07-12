@@ -115,6 +115,22 @@ describe('live2d store model selection', () => {
     expect(store.enabled).toBe(false)
   })
 
+  it('preserves the browser selection when the catalog request fails', async () => {
+    localStorage.setItem('atri-live2d-settings', JSON.stringify({
+      activeModelId: 'user_choice',
+    }))
+    vi.mocked(live2dApi.list).mockRejectedValue(new Error('temporary failure'))
+    const store = useLive2dStore()
+
+    await store.fetchModels()
+
+    expect(store.activeModelId).toBe('user_choice')
+    expect(store.activeModel).toBeNull()
+    expect(JSON.parse(localStorage.getItem('atri-live2d-settings') ?? '{}')).toMatchObject({
+      activeModelId: 'user_choice',
+    })
+  })
+
   it('only accepts a model id returned by the catalog', async () => {
     vi.mocked(live2dApi.list).mockResolvedValue([model('installed')])
     const store = useLive2dStore()

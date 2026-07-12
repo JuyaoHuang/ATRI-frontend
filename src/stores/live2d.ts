@@ -321,7 +321,6 @@ export const useLive2dStore = defineStore('live2d', () => {
     catch (error) {
       console.error('获取 Live2D 模型失败:', error)
       models.value = []
-      activeModelId.value = null
       activeExpressions.value = []
       availableMotions.value = []
       selectedRuntimeMotionPath.value = ''
