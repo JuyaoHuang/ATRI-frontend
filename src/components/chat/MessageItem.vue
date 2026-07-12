@@ -7,6 +7,8 @@ import { useUserStore } from '@/stores/user'
 import type { Message } from '@/types/message'
 import { resolveAvatarUrl } from '@/utils/avatar'
 
+import MarkdownContent from './MarkdownContent.vue'
+
 interface Props {
   message: Message
   variant?: 'default' | 'stage'
@@ -105,7 +107,7 @@ function playMessageSpeech() {
           <span class="message-time">{{ formatTime(message.timestamp) }}</span>
         </div>
       </div>
-      <div class="message-text">{{ message.content }}</div>
+      <MarkdownContent class="message-text" :source="message.content" />
     </div>
 
     <div v-if="message.role === 'human' && !isStage" class="message-avatar">
