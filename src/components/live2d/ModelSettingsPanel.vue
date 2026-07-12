@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 
 import type { ModelSettingsRuntimeSnapshot } from './runtime'
 
@@ -33,13 +33,13 @@ const settingsClassList = computed(() => {
   return typeof props.settingsClass === 'string' ? [props.settingsClass] : props.settingsClass
 })
 
-async function handleModelPick(modelId: string | undefined) {
-  if (!modelId) {
-    return
-  }
-
+function handleModelPick(modelId: string) {
   live2dStore.setActiveModel(modelId)
 }
+
+onMounted(() => {
+  void live2dStore.fetchModels()
+})
 </script>
 
 <template>
@@ -52,11 +52,10 @@ async function handleModelPick(modelId: string | undefined) {
   >
     <Callout label="我们支持 2D 模型">
       <p>
-        点击 <strong>选择模型</strong> 将 Live2D 模型导入目录，目前支持
-        <code>.zip</code>。
+        点击 <strong>选择模型</strong> 可使用服务器管理员已经安装并通过校验的 Live2D 模型。
       </p>
       <p>
-        这里直接沿用 AIRI 的模型设置结构和交互方式，只把模型来源改成当前项目的后端接口。
+        添加或移除模型需要管理员直接维护后端 <code>data/live2d/models/</code> 目录；普通用户不能在网页中上传、重命名或删除模型。
       </p>
     </Callout>
 

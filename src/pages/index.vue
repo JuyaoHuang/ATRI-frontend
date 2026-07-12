@@ -103,7 +103,7 @@ watch(isLive2dMode, (enabled) => {
               :max-fps="live2dStore.maxFps"
               :resolution="live2dStore.renderScale"
               :model-cache-version="live2dStore.modelCacheVersion"
-              empty-text="No available Live2D model. Import one in /settings/models to enable the stage."
+              empty-text="No available Live2D model. Ask the server administrator to install one."
             />
           </div>
 
