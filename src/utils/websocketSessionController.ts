@@ -4,6 +4,8 @@ import {
   type SendAudioChunkPayload,
   type SendAudioEndPayload,
   type SendTextPayload,
+  type SendVisionCaptureResultPayload,
+  type SendVisionStatePayload,
   type WebSocketSessionEventMap
 } from '@/types/websocket'
 import { WebSocketManager } from '@/utils/websocket'
@@ -66,15 +68,59 @@ export class WebSocketSessionController {
   }
 
   sendText(payload: SendTextPayload) {
-    return this.sendRaw({
+    let message = {
       type: 'input:text',
       data: {
         text: payload.text,
         chat_id: payload.chatId,
         character_id: payload.characterId,
-        client_context: payload.clientContext
+        request_id: payload.requestId,
+        client_context: payload.clientContext,
+        image: payload.image
+      }
+    }
+    if (payload.image && !messageWithinByteLimit(message, payload.maxMessageBytes)) {
+      message = {
+        ...message,
+        data: { ...message.data, image: undefined }
+      }
+    }
+    if (!messageWithinByteLimit(message, payload.maxMessageBytes)) {
+      return false
+    }
+    return this.sendRaw(message)
+  }
+
+  sendVisionState(payload: SendVisionStatePayload) {
+    return this.sendRaw({
+      type: 'input:vision:state',
+      data: {
+        enabled: payload.enabled,
+        source: payload.source
       }
     })
+  }
+
+  sendVisionCaptureResult(payload: SendVisionCaptureResultPayload) {
+    let message = {
+      type: 'input:vision:capture-result',
+      data: {
+        generation_id: payload.generationId,
+        status: payload.status,
+        image: payload.status === 'captured' ? payload.image : undefined
+      }
+    }
+    if (payload.image && !messageWithinByteLimit(message, payload.maxMessageBytes)) {
+      message = {
+        ...message,
+        data: {
+          generation_id: payload.generationId,
+          status: 'failed',
+          image: undefined
+        }
+      }
+    }
+    return this.sendRaw(message)
   }
 
   sendAudioChunk(payload: SendAudioChunkPayload) {
@@ -186,6 +232,12 @@ export class WebSocketSessionController {
       case 'output:chat:interrupted':
         this.emit('chat:interrupted', message.data as WebSocketSessionEventMap['chat:interrupted'])
         break
+      case 'output:chat:error':
+        this.emit(
+          'chat:generation-error',
+          message.data as WebSocketSessionEventMap['chat:generation-error']
+        )
+        break
       case 'output:audio:segment':
         this.emit('audio:segment', message.data as WebSocketSessionEventMap['audio:segment'])
         break
@@ -203,6 +255,12 @@ export class WebSocketSessionController {
         break
       case 'control:interrupt':
         this.emit('vad:interrupt', message.data as WebSocketSessionEventMap['vad:interrupt'])
+        break
+      case 'control:vision:capture-request':
+        this.emit(
+          'vision:capture-request',
+          message.data as WebSocketSessionEventMap['vision:capture-request']
+        )
         break
       case 'error':
         this.emit('chat:error', message.data as WebSocketSessionEventMap['chat:error'])
@@ -246,3 +304,15 @@ export class WebSocketSessionController {
 }
 
 export const websocketSessionController = new WebSocketSessionController()
+
+function messageWithinByteLimit(message: unknown, maxMessageBytes?: number): boolean {
+  if (
+    typeof maxMessageBytes !== 'number'
+    || !Number.isSafeInteger(maxMessageBytes)
+    || maxMessageBytes <= 0
+  ) {
+    return true
+  }
+  const serialized = JSON.stringify(message)
+  return new TextEncoder().encode(serialized).byteLength <= maxMessageBytes
+}

@@ -12,6 +12,7 @@ import {
   type AudioSegmentData,
   type ChatCompleteData,
   type ChatErrorData,
+  type ChatGenerationErrorData,
   type ChatInterruptedData,
   type ChatChunkData,
   type InterruptData,
@@ -20,6 +21,8 @@ import {
   type SendAudioChunkPayload,
   type SendAudioEndPayload,
   type SendTextPayload,
+  type SendVisionCaptureResultPayload,
+  type SendVisionStatePayload,
   type WebSocketSessionEventMap
 } from '@/types/websocket'
 import { extractLive2dExpression } from '@/utils/live2dExpression'
@@ -66,6 +69,12 @@ export function useWebSocket() {
   const sendAudioEnd = (payload: SendAudioEndPayload) =>
     websocketSessionController.sendAudioEnd(payload)
 
+  const sendVisionState = (payload: SendVisionStatePayload) =>
+    websocketSessionController.sendVisionState(payload)
+
+  const sendVisionCaptureResult = (payload: SendVisionCaptureResultPayload) =>
+    websocketSessionController.sendVisionCaptureResult(payload)
+
   const on = <K extends keyof WebSocketSessionEventMap>(
     event: K,
     listener: (payload: WebSocketSessionEventMap[K]) => void
@@ -91,6 +100,8 @@ export function useWebSocket() {
     sendText,
     sendAudioChunk,
     sendAudioEnd,
+    sendVisionState,
+    sendVisionCaptureResult,
     on,
     off
   }
@@ -221,10 +232,34 @@ function ensureDefaultHandlers(deps: {
 
   websocketSessionController.on('chat:error', (errorData: ChatErrorData) => {
     wsStore.setError(errorData.message || '对话错误')
-    chatStore.failActiveStream({
+    if (errorData.chat_id && errorData.request_id) {
+      chatStore.rejectPendingSubmission({
+        chatId: errorData.chat_id,
+        characterId: errorData.character_id,
+        requestId: errorData.request_id
+      })
+    }
+  })
+
+  websocketSessionController.on('chat:generation-error', (errorData: ChatGenerationErrorData) => {
+    if (
+      !errorData.chat_id
+      || !errorData.character_id
+      || !errorData.generation_id
+      || !errorData.message
+    ) {
+      return
+    }
+
+    const result = chatStore.failActiveGeneration({
       chatId: errorData.chat_id,
-      generationId: errorData.generation_id
+      characterId: errorData.character_id,
+      generationId: errorData.generation_id,
+      failure: { message: errorData.message }
     })
+    if (result !== 'ignored') {
+      audioPlayer.discardGenerationAudio(errorData.generation_id)
+    }
   })
 
   websocketSessionController.on('audio:segment', (segmentData: AudioSegmentData) => {
@@ -303,7 +338,8 @@ function ensureDefaultHandlers(deps: {
     chatStore.markActiveStreamInterrupted({
       chatId: interruptData?.chat_id,
       characterId: interruptData?.character_id,
-      generationId: interruptData?.generation_id
+      generationId: interruptData?.generation_id,
+      preserveChatGeneration: interruptData?.preserve_chat_generation
     })
   })
 }

@@ -1,46 +1,68 @@
 import { defineStore } from 'pinia'
-import type { Message } from '@/types/message'
+import type {
+  ChatMessageItem,
+  ChatTimelineItem,
+  Message
+} from '@/types/message'
 
 export interface ActiveStream {
   chatId: string
   characterId: string
+  requestId: string | null
   generationId: string | null
   status: 'pending' | 'streaming' | 'interrupted'
 }
 
-type StreamApplyResult = 'ignored' | 'hidden' | 'visible'
+export type GenerationApplyResult = 'ignored' | 'hidden' | 'visible'
 
 export interface ChatState {
   currentChatId: string | null
   currentCharacterId: string | null
-  messages: Message[]
+  timelineItems: ChatTimelineItem[]
   streamingText: string
   activeStream: ActiveStream | null
   pendingInterruptedStream: ActiveStream | null
   skipNextHistoryLoadChatId: string | null
   pendingDeferredTitleChatId: string | null
   draftChatId: string | null
+  submissionPending: boolean
 }
 
 export const useChatStore = defineStore('chat', {
   state: (): ChatState => ({
     currentChatId: null,
     currentCharacterId: null,
-    messages: [],
+    timelineItems: [],
     streamingText: '',
     activeStream: null,
     pendingInterruptedStream: null,
     skipNextHistoryLoadChatId: null,
     pendingDeferredTitleChatId: null,
-    draftChatId: null
+    draftChatId: null,
+    submissionPending: false
   }),
 
   getters: {
-    connectionBusy: state => state.activeStream !== null,
-    isCurrentChatStreaming: state => state.activeStream?.chatId === state.currentChatId
+    connectionBusy: state => state.activeStream !== null || state.submissionPending,
+    isCurrentChatStreaming: state => state.activeStream?.chatId === state.currentChatId,
+    messages: state => state.timelineItems.filter(
+      (item): item is ChatMessageItem => item.kind === 'message'
+    )
   },
 
   actions: {
+    reserveSubmission() {
+      if (this.submissionPending || this.activeStream) {
+        return false
+      }
+      this.submissionPending = true
+      return true
+    },
+
+    releaseSubmission() {
+      this.submissionPending = false
+    },
+
     setCurrentCharacter(characterId: string | null) {
       this.currentCharacterId = characterId
     },
@@ -100,30 +122,41 @@ export const useChatStore = defineStore('chat', {
         this.draftChatId = null
       }
 
-      this.messages = this.messages.map(message => {
-        if (message.chat_id !== previousChatId) {
-          return message
+      this.timelineItems = this.timelineItems.map(item => {
+        if (item.chat_id !== previousChatId) {
+          return item
         }
 
         return {
-          ...message,
+          ...item,
           chat_id: nextChatId
         }
       })
     },
 
     addMessage(message: Message) {
-      this.messages.push(message)
+      if (message.chat_id !== this.currentChatId) {
+        return false
+      }
+
+      this.timelineItems.push({ ...message, kind: 'message' })
+      return true
+    },
+
+    replaceTimelineItems(items: ChatTimelineItem[]) {
+      this.timelineItems = items
     },
 
     beginStreaming(payload: {
       chatId: string
       characterId: string
+      requestId?: string | null
       generationId?: string | null
     }) {
       this.activeStream = {
         chatId: payload.chatId,
         characterId: payload.characterId,
+        requestId: payload.requestId || null,
         generationId: payload.generationId || null,
         status: 'pending'
       }
@@ -210,7 +243,8 @@ export const useChatStore = defineStore('chat', {
         return false
       }
 
-      this.messages.push({
+      this.timelineItems.push({
+        kind: 'message',
         id: `asr_${payload.generationId || Date.now()}`,
         chat_id: payload.chatId,
         role: 'human',
@@ -226,7 +260,7 @@ export const useChatStore = defineStore('chat', {
       characterId?: string
       generationId?: string
       chunk: string
-    }): StreamApplyResult {
+    }): GenerationApplyResult {
       if (!this.matchesActiveStream(payload)) {
         return 'ignored'
       }
@@ -249,7 +283,7 @@ export const useChatStore = defineStore('chat', {
       name?: string
       avatar?: string
       generationId?: string
-    }): StreamApplyResult {
+    }): GenerationApplyResult {
       if (!this.matchesActiveStream(payload) || this.activeStream?.status === 'interrupted') {
         return 'ignored'
       }
@@ -257,7 +291,8 @@ export const useChatStore = defineStore('chat', {
       const visible = this.currentChatId === payload.chatId
         && this.currentCharacterId === payload.characterId
       if (visible && payload.chatId) {
-        this.messages.push({
+        this.timelineItems.push({
+          kind: 'message',
           id: `msg_${Date.now()}`,
           chat_id: payload.chatId,
           role: 'ai',
@@ -277,7 +312,11 @@ export const useChatStore = defineStore('chat', {
       chatId?: string
       characterId?: string
       generationId?: string
-    }): StreamApplyResult {
+      preserveChatGeneration?: boolean
+    }): GenerationApplyResult {
+      if (payload.preserveChatGeneration) {
+        return 'ignored'
+      }
       if (!this.matchesActiveStream(payload, { requireCharacter: false })) {
         return 'ignored'
       }
@@ -300,7 +339,7 @@ export const useChatStore = defineStore('chat', {
       interruptReason?: string
       name?: string
       avatar?: string
-    }): StreamApplyResult {
+    }): GenerationApplyResult {
       const matchesActive = this.matchesActiveStream(payload)
       const matchesPending = matchesActive ? false : this.matchesPendingInterruptedStream(payload)
       if (!matchesActive && !matchesPending) {
@@ -311,7 +350,8 @@ export const useChatStore = defineStore('chat', {
         && this.currentCharacterId === payload.characterId
       const content = (payload.partialReply || '').trim()
       if (visible && payload.chatId && content) {
-        this.messages.push({
+        this.timelineItems.push({
+          kind: 'message',
           id: `interrupted_${payload.generationId || Date.now()}`,
           chat_id: payload.chatId,
           role: 'ai',
@@ -334,24 +374,57 @@ export const useChatStore = defineStore('chat', {
       return visible ? 'visible' : 'hidden'
     },
 
-    failActiveStream(payload: {
-      chatId?: string
-      generationId?: string
-    }) {
-      if (!this.matchesActiveStream(
-        payload,
-        {
-          requireCharacter: false,
-          bindGeneration: false,
-          allowMissingGenerationAfterBind: true
-        }
-      )) {
-        return false
+    failActiveGeneration(payload: {
+      chatId: string
+      characterId: string
+      generationId: string
+      failure: { message: string }
+    }): GenerationApplyResult {
+      if (!this.matchesActiveStream({
+        chatId: payload.chatId,
+        characterId: payload.characterId,
+        generationId: payload.generationId
+      })) {
+        return 'ignored'
       }
 
       this.activeStream = null
       this.streamingText = ''
-      return true
+      const visible = this.currentChatId === payload.chatId
+        && this.currentCharacterId === payload.characterId
+      if (visible) {
+        this.timelineItems.push({
+          kind: 'notice',
+          id: `notice_${payload.generationId}`,
+          chat_id: payload.chatId,
+          generation_id: payload.generationId,
+          level: 'error',
+          content: payload.failure.message,
+          timestamp: new Date().toISOString()
+        })
+      }
+      return visible ? 'visible' : 'hidden'
+    },
+
+    rejectPendingSubmission(payload: {
+      chatId: string
+      characterId?: string
+      requestId: string
+    }): GenerationApplyResult {
+      const stream = this.activeStream
+      if (
+        !stream
+        || stream.status !== 'pending'
+        || stream.chatId !== payload.chatId
+        || stream.requestId !== payload.requestId
+        || (payload.characterId && stream.characterId !== payload.characterId)
+      ) {
+        return 'ignored'
+      }
+
+      this.activeStream = null
+      this.streamingText = ''
+      return this.currentChatId === payload.chatId ? 'visible' : 'hidden'
     },
 
     clearActiveStream() {
@@ -360,7 +433,7 @@ export const useChatStore = defineStore('chat', {
     },
 
     clearMessages() {
-      this.messages = []
+      this.timelineItems = []
     }
   }
 })

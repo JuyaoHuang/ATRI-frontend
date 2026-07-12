@@ -13,6 +13,7 @@ import { useChat } from '@/composables/useChat'
 import { useASRStore } from '@/stores/asr'
 
 import RealtimeVoiceInput from './RealtimeVoiceInput.vue'
+import VisionInput from './VisionInput.vue'
 import VoiceInput from './VoiceInput.vue'
 
 interface Props {
@@ -245,6 +246,7 @@ onUnmounted(() => {
 
           <VoiceInput v-if="asrStore.moduleEnabled" compact @transcript="handleTranscript" />
           <RealtimeVoiceInput />
+          <VisionInput />
         </div>
       </div>
       <div class="input-actions flex shrink-0 flex-col items-center justify-end gap-2">

@@ -6,9 +6,9 @@ import { useChatHistoryScroll } from '@/composables/useChatHistoryScroll'
 import { useChatStore } from '@/stores/chat'
 import { useChatsStore } from '@/stores/chats'
 
-import MessageItem from '@/components/chat/MessageItem.vue'
+import ChatTimelineItem from '@/components/chat/ChatTimelineItem.vue'
 
-const { messages, streamingText, isStreaming } = useChat()
+const { timelineItems, streamingText, isStreaming } = useChat()
 const chatStore = useChatStore()
 const chatsStore = useChatsStore()
 const chatHistoryRef = ref<HTMLDivElement>()
@@ -29,7 +29,7 @@ const emptyStateText = computed(() => {
   return '开始对话吧。'
 })
 
-const renderMessages = computed(() => messages.value)
+const renderTimelineItems = computed(() => timelineItems.value)
 
 function getChatHistoryItemKey(message: { id?: string }, index: number) {
   if (message.id) {
@@ -41,7 +41,7 @@ function getChatHistoryItemKey(message: { id?: string }, index: number) {
 
 useChatHistoryScroll({
   containerRef: chatHistoryRef,
-  messages: renderMessages,
+  messages: renderTimelineItems,
   getKey: getChatHistoryItemKey
 })
 
@@ -55,9 +55,9 @@ function scrollToBottom() {
 }
 
 watch(
-  () => [chatStore.currentChatId, renderMessages.value.length],
-  ([chatId, messageCount]) => {
-    if (!chatId || messageCount === 0) {
+  () => [chatStore.currentChatId, renderTimelineItems.value.length],
+  ([chatId, itemCount]) => {
+    if (!chatId || itemCount === 0) {
       return
     }
     scrollToBottom()
@@ -79,17 +79,17 @@ watch(
     py="<sm:2"
     class="gap-2 stage-chat-history"
   >
-    <div v-if="renderMessages.length === 0 && !isStreaming" class="stage-chat-empty-state">
+    <div v-if="renderTimelineItems.length === 0 && !isStreaming" class="stage-chat-empty-state">
       <p>{{ emptyStateText }}</p>
     </div>
 
-    <template v-for="(message, index) in renderMessages" :key="getChatHistoryItemKey(message, index)">
+    <template v-for="(item, index) in renderTimelineItems" :key="getChatHistoryItemKey(item, index)">
       <div
         :data-chat-message-index="index"
-        :data-chat-message-key="String(getChatHistoryItemKey(message, index))"
-        :data-chat-message-role="message.role"
+        :data-chat-message-key="String(getChatHistoryItemKey(item, index))"
+        :data-chat-message-role="item.kind === 'message' ? item.role : 'notice'"
       >
-        <MessageItem :message="message" variant="stage" />
+        <ChatTimelineItem :item="item" variant="stage" />
       </div>
     </template>
 

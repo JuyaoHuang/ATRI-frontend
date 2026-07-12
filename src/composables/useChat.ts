@@ -3,11 +3,13 @@ import { toast } from 'vue-sonner'
 
 import { chatsApi } from '@/api/chats'
 import { useAudioPlayer } from '@/composables/useAudioPlayer'
+import { useVision } from '@/composables/useVision'
 import { useCharactersStore } from '@/stores/characters'
 import { useChatStore } from '@/stores/chat'
 import { useChatsStore } from '@/stores/chats'
 import { useLive2dStore } from '@/stores/live2d'
 import { useWebSocket } from '@/composables/useWebSocket'
+import type { ChatMessageItem } from '@/types/message'
 import { extractLive2dExpression } from '@/utils/live2dExpression'
 
 interface ClientDatetimeContext {
@@ -49,85 +51,102 @@ export function useChat() {
   const charactersStore = useCharactersStore()
   const live2dStore = useLive2dStore()
   const audioPlayer = useAudioPlayer()
+  const { captureForSubmission, websocketMaxMessageBytes } = useVision()
 
   const sendMessage = async (text: string) => {
-    if (!text.trim()) return
-    if (chatStore.connectionBusy) return false
-    if (!canSend()) {
-      toast.error('WebSocket is not connected')
-      return false
-    }
+    if (!text.trim()) return false
+    if (!chatStore.reserveSubmission()) return false
 
-    const messageText = text.trim()
-    const sentAt = new Date()
-    const sentAtIso = sentAt.toISOString()
-    const clientContext = buildClientContext(sentAt)
-    const currentCharacterId = charactersStore.activeCharacterId || chatStore.currentCharacterId
-    let currentChatId = chatStore.currentChatId
-    let deferredTitleSeed: string | null = null
-
-    if (!currentCharacterId) {
-      console.error('No character selected')
-      toast.error('当前没有可用角色，无法发送消息')
-      return false
-    }
-
-    if (!currentChatId) {
-      const draftChat = chatsStore.insertDraftChat(currentCharacterId, messageText)
-      currentChatId = draftChat.id
-      chatStore.beginDraftChat(draftChat.id, currentCharacterId)
-
-      try {
-        const newChat = await chatsStore.createChat(currentCharacterId, messageText, true, {
-          insertIntoList: false
-        })
-        chatsStore.replaceDraftChat(draftChat.id, newChat)
-        chatStore.markSkipNextHistoryLoad(newChat.id)
-        chatStore.replaceCurrentChatId(draftChat.id, newChat.id)
-        chatStore.setCurrentCharacter(currentCharacterId)
-        deferredTitleSeed = draftChat.title
-        currentChatId = newChat.id
-      } catch (error) {
-        console.error('自动创建聊天失败:', error)
-        chatsStore.removeDraftChat(draftChat.id)
-        chatStore.prepareNewChat(currentCharacterId)
-        toast.error('自动创建聊天失败，请检查后端服务是否已重启')
+    try {
+      if (!canSend()) {
+        toast.error('WebSocket is not connected')
         return false
       }
+
+      const messageText = text.trim()
+      const sentAt = new Date()
+      const sentAtIso = sentAt.toISOString()
+      const clientContext = buildClientContext(sentAt)
+      const currentCharacterId = charactersStore.activeCharacterId || chatStore.currentCharacterId
+      let currentChatId = chatStore.currentChatId
+      let deferredTitleSeed: string | null = null
+
+      if (!currentCharacterId) {
+        console.error('No character selected')
+        toast.error('当前没有可用角色，无法发送消息')
+        return false
+      }
+
+      if (!currentChatId) {
+        const draftChat = chatsStore.insertDraftChat(currentCharacterId, messageText)
+        currentChatId = draftChat.id
+        chatStore.beginDraftChat(draftChat.id, currentCharacterId)
+
+        try {
+          const newChat = await chatsStore.createChat(currentCharacterId, messageText, true, {
+            insertIntoList: false
+          })
+          chatsStore.replaceDraftChat(draftChat.id, newChat)
+          chatStore.markSkipNextHistoryLoad(newChat.id)
+          chatStore.replaceCurrentChatId(draftChat.id, newChat.id)
+          chatStore.setCurrentCharacter(currentCharacterId)
+          deferredTitleSeed = draftChat.title
+          currentChatId = newChat.id
+        } catch (error) {
+          console.error('自动创建聊天失败:', error)
+          chatsStore.removeDraftChat(draftChat.id)
+          chatStore.prepareNewChat(currentCharacterId)
+          toast.error('自动创建聊天失败，请检查后端服务是否已重启')
+          return false
+        }
+      }
+
+      if (!canSend()) {
+        toast.error('WebSocket is not connected')
+        return false
+      }
+
+      const image = await captureForSubmission()
+      const requestId = createRequestId()
+      audioPlayer.stopBecauseContextChanged()
+      chatStore.beginStreaming({
+        chatId: currentChatId,
+        characterId: currentCharacterId,
+        requestId
+      })
+
+      const sent = sendText({
+        text: messageText,
+        chatId: currentChatId,
+        characterId: currentCharacterId,
+        requestId,
+        clientContext,
+        image,
+        maxMessageBytes: websocketMaxMessageBytes.value
+      })
+
+      if (!sent) {
+        toast.error('WebSocket is not connected')
+        chatStore.clearActiveStream()
+        return false
+      }
+
+      if (deferredTitleSeed) {
+        chatStore.markPendingDeferredTitle(currentChatId)
+        chatsStore.watchDeferredTitle(currentChatId, currentCharacterId, deferredTitleSeed)
+      }
+
+      chatStore.addMessage({
+        id: `msg_${Date.now()}`,
+        chat_id: currentChatId,
+        role: 'human',
+        content: messageText,
+        timestamp: sentAtIso
+      })
+      return true
+    } finally {
+      chatStore.releaseSubmission()
     }
-
-    audioPlayer.stopBecauseContextChanged()
-    chatStore.beginStreaming({
-      chatId: currentChatId,
-      characterId: currentCharacterId
-    })
-
-    const sent = sendText({
-      text: messageText,
-      chatId: currentChatId,
-      characterId: currentCharacterId,
-      clientContext
-    })
-
-    if (!sent) {
-      toast.error('WebSocket is not connected')
-      chatStore.clearActiveStream()
-      return false
-    }
-
-    if (deferredTitleSeed) {
-      chatStore.markPendingDeferredTitle(currentChatId)
-      chatsStore.watchDeferredTitle(currentChatId, currentCharacterId, deferredTitleSeed)
-    }
-
-    chatStore.addMessage({
-      id: `msg_${Date.now()}`,
-      chat_id: currentChatId,
-      role: 'human',
-      content: messageText,
-      timestamp: sentAtIso
-    })
-    return true
   }
 
   const loadHistory = async (chatId: string) => {
@@ -138,7 +157,7 @@ export function useChat() {
       }
 
       let lastAssistantExpression: string | null = null
-      chatStore.messages = response.messages.map((msg, index) => {
+      const historyItems: ChatMessageItem[] = response.messages.map((msg, index) => {
         // 如果是 AI 消息且有 name，从 characters store 获取 avatar
         let avatar: string | undefined
         let content = msg.content
@@ -153,6 +172,7 @@ export function useChat() {
         }
 
         return {
+          kind: 'message',
           id: `msg_${index}`,
           chat_id: chatId,
           role: msg.role,
@@ -165,6 +185,7 @@ export function useChat() {
           interrupt_reason: msg.interrupt_reason
         }
       })
+      chatStore.replaceTimelineItems(historyItems)
 
       live2dStore.requestExpression(lastAssistantExpression)
     } catch (error) {
@@ -174,10 +195,18 @@ export function useChat() {
 
   return {
     messages: computed(() => chatStore.messages),
+    timelineItems: computed(() => chatStore.timelineItems),
     isStreaming: computed(() => chatStore.isCurrentChatStreaming),
     connectionBusy: computed(() => chatStore.connectionBusy),
     streamingText: computed(() => chatStore.isCurrentChatStreaming ? chatStore.streamingText : ''),
     sendMessage,
     loadHistory
   }
+}
+
+let requestSequence = 0
+
+function createRequestId(): string {
+  requestSequence += 1
+  return `request_${Date.now().toString(36)}_${requestSequence.toString(36)}`
 }

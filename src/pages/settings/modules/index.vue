@@ -6,6 +6,7 @@ import RippleGrid from '@/components/ui/RippleGrid.vue'
 import { useRippleGridState } from '@/composables/useRippleGridState'
 import { useASRStore } from '@/stores/asr'
 import { useTTSStore } from '@/stores/tts'
+import { useVisionStore } from '@/stores/vision'
 
 interface ModuleItem {
   id: string
@@ -20,6 +21,7 @@ interface ModuleItem {
 
 const asrStore = useASRStore()
 const ttsStore = useTTSStore()
+const visionStore = useVisionStore()
 const { lastClickedIndex, setLastClickedIndex } = useRippleGridState()
 
 const modulesList = computed<ModuleItem[]>(() => [
@@ -49,11 +51,13 @@ const modulesList = computed<ModuleItem[]>(() => [
   },
   {
     id: 'vision',
-    name: '视觉模块',
-    description: '配置视觉感知能力、图像输入与扩展能力。',
-    icon: 'i-solar:eye-closed-bold-duotone',
+    name: '视觉功能',
+    description: '启用屏幕视觉输入，并管理当前标签页的共享入口。',
+    icon: visionStore.moduleEnabled
+      ? 'i-solar:eye-bold-duotone'
+      : 'i-solar:eye-closed-bold-duotone',
     to: '/settings/modules/vision',
-    configured: false,
+    configured: visionStore.moduleEnabled,
   },
 ])
 
@@ -63,6 +67,9 @@ onMounted(() => {
   }
   if (!ttsStore.providers.length && !ttsStore.loading) {
     void ttsStore.load()
+  }
+  if (!visionStore.loaded && !visionStore.loading) {
+    void visionStore.load()
   }
 })
 </script>
