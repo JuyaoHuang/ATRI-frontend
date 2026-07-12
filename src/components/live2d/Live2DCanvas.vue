@@ -6,6 +6,7 @@ import { Ticker, TickerPlugin } from '@pixi/ticker'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { FileLoader, Live2DModel, MotionPriority } from 'pixi-live2d-display/cubism4'
 
+import { createModelLoadTracker } from './modelLoadTracker'
 import type {
   Live2DExpressionRequest,
   Live2DMotion,
@@ -101,6 +102,7 @@ let resizeObserver: ResizeObserver | null = null
 let blinkTimer: number | null = null
 let blinkResetTimer: number | null = null
 let removeMotionFinishListener: (() => void) | null = null
+const modelLoadTracker = createModelLoadTracker()
 
 const resolvedModelUrl = computed(() => {
   if (!props.modelUrl) {
@@ -431,17 +433,17 @@ const handleResize = () => {
   applyTransform()
 }
 
-const createModelFromSource = async () => {
-  if (!resolvedModelUrl.value) {
-    throw new Error('Live2D model URL is missing')
-  }
-
-  if (props.modelId && props.modelPath) {
+const createModelFromSource = async (source: {
+  modelId: string | null
+  modelPath: string | null
+  url: string
+}) => {
+  if (source.modelId && source.modelPath) {
     try {
       const files = await loadLive2dFilesWithOpfs({
-        modelId: props.modelId,
-        settingsUrl: resolvedModelUrl.value,
-        settingsPath: props.modelPath,
+        modelId: source.modelId,
+        settingsUrl: source.url,
+        settingsPath: source.modelPath,
       })
       const settings = await FileLoader.createSettings(files)
       await FileLoader.upload(files, settings)
@@ -452,23 +454,35 @@ const createModelFromSource = async () => {
     }
   }
 
-  return await Live2DModel.from(resolvedModelUrl.value) as Live2DModel
+  return await Live2DModel.from(source.url) as Live2DModel
 }
 
 const loadModel = async () => {
+  const sourceUrl = resolvedModelUrl.value
+  const loadToken = modelLoadTracker.begin(sourceUrl)
+
   if (!app.value) {
     return
   }
 
   destroyModel()
 
-  if (!resolvedModelUrl.value) {
+  if (!sourceUrl) {
     return
   }
 
   try {
-    const loadedModel = await createModelFromSource()
-    if (!app.value) {
+    const loadedModel = await createModelFromSource({
+      modelId: props.modelId,
+      modelPath: props.modelPath,
+      url: sourceUrl,
+    })
+    const isCurrentLoad = () => modelLoadTracker.isCurrent(
+      loadToken,
+      resolvedModelUrl.value,
+    )
+
+    if (!isCurrentLoad() || !app.value) {
       loadedModel.destroy()
       return
     }
@@ -489,10 +503,19 @@ const loadModel = async () => {
     startBlinkLoop()
     bindMotionLoop()
     await applyExpression()
+    if (!isCurrentLoad()) {
+      return
+    }
     await applyMotion()
+    if (!isCurrentLoad()) {
+      return
+    }
     emit('loaded')
   }
   catch (error) {
+    if (!modelLoadTracker.isCurrent(loadToken, resolvedModelUrl.value)) {
+      return
+    }
     console.error('加载 Live2D 模型失败:', error)
     emit('motionsLoaded', [])
     emit('error', error instanceof Error ? error.message : '加载 Live2D 模型失败')
@@ -541,6 +564,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  modelLoadTracker.invalidate()
   resizeObserver?.disconnect()
   resizeObserver = null
   destroyPixi()
