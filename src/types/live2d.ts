@@ -5,7 +5,6 @@ export interface Live2DModel {
   modelUrl: string
   thumbnailUrl?: string
   expressions: string[]
-  createdAt: string
   isDefault: boolean
 }
 

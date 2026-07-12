@@ -157,7 +157,6 @@ function mapModel(model: Live2DModelResponse): Live2DModel {
     modelUrl: model.model_url,
     thumbnailUrl: model.thumbnail_url || undefined,
     expressions: model.expressions || [],
-    createdAt: model.created_at,
     isDefault: model.is_default,
   }
 }
@@ -186,7 +185,6 @@ export const useLive2dStore = defineStore('live2d', () => {
 
   const models = ref<Live2DModel[]>([])
   const loading = ref(false)
-  const uploading = ref(false)
   const availableMotions = ref<Live2DMotion[]>([])
   const expressionRequest = ref<Live2DExpressionRequest>({
     name: null,
@@ -286,7 +284,12 @@ export const useLive2dStore = defineStore('live2d', () => {
       return
     }
 
-    const fallbackModel = models.value.find(model => model.isDefault) || models.value[0] || null
+    const fallbackModel = models.value.find(model => model.isDefault) || null
+    if (activeModelId.value !== fallbackModel?.id) {
+      availableMotions.value = []
+      selectedRuntimeMotionPath.value = ''
+      currentMotion.value = null
+    }
     activeModelId.value = fallbackModel?.id || null
     syncExpressionState()
   }
@@ -321,6 +324,8 @@ export const useLive2dStore = defineStore('live2d', () => {
       activeModelId.value = null
       activeExpressions.value = []
       availableMotions.value = []
+      selectedRuntimeMotionPath.value = ''
+      currentMotion.value = null
       return []
     }
     finally {
@@ -328,66 +333,14 @@ export const useLive2dStore = defineStore('live2d', () => {
     }
   }
 
-  async function uploadModel(file: File, name?: string) {
-    uploading.value = true
-    try {
-      const response = await live2dApi.upload(file, name)
-      const model = mapModel(response)
-      const existingIndex = models.value.findIndex(item => item.id === model.id)
-
-      if (existingIndex >= 0) {
-        models.value.splice(existingIndex, 1, model)
-      }
-      else {
-        models.value.unshift(model)
-      }
-
-      if (model.isDefault || !activeModelId.value) {
-        activeModelId.value = model.id
-      }
-
-      ensureActiveModel()
-      return model
-    }
-    finally {
-      uploading.value = false
-    }
-  }
-
-  async function renameModel(modelId: string, name: string) {
-    const response = await live2dApi.update(modelId, { name })
-    const nextModel = mapModel(response)
-    const index = models.value.findIndex(model => model.id === modelId)
-
-    if (index >= 0) {
-      models.value.splice(index, 1, nextModel)
-    }
-
-    if (activeModelId.value === modelId) {
-      activeModelId.value = nextModel.id
-    }
-
-    ensureActiveModel()
-    return nextModel
-  }
-
-  async function deleteModel(modelId: string) {
-    await live2dApi.remove(modelId)
-    models.value = models.value.filter(model => model.id !== modelId)
-    if (activeModelId.value === modelId) {
-      activeModelId.value = null
-      availableMotions.value = []
-      selectedRuntimeMotionPath.value = ''
-      currentMotion.value = null
-    }
-    ensureActiveModel()
-  }
-
   function setEnabled(value: boolean) {
     enabled.value = value
   }
 
   function setActiveModel(modelId: string) {
+    if (!models.value.some(model => model.id === modelId)) {
+      return
+    }
     activeModelId.value = modelId
     availableMotions.value = []
     selectedRuntimeMotionPath.value = ''
@@ -555,7 +508,6 @@ export const useLive2dStore = defineStore('live2d', () => {
     expressionLlmExposed,
     models,
     loading,
-    uploading,
     availableMotions,
     expressionRequest,
     activeExpressions,
@@ -563,9 +515,6 @@ export const useLive2dStore = defineStore('live2d', () => {
     activeModel,
     expressionGroups,
     fetchModels,
-    uploadModel,
-    renameModel,
-    deleteModel,
     setEnabled,
     setActiveModel,
     setScale,
