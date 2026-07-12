@@ -82,6 +82,41 @@ describe('useChat visual submission', () => {
     expect(payload.maxMessageBytes).toBe(8 * 1024 * 1024)
   })
 
+  it('keeps a pending submission out of a newly selected chat timeline', async () => {
+    let resolveCapture: ((image: InputImage) => void) | undefined
+    mocks.captureForSubmission.mockReturnValueOnce(new Promise<InputImage>(resolve => {
+      resolveCapture = resolve
+    }))
+    const chat = useChat()
+    const chatStore = useChatStore()
+
+    const submission = chat.sendMessage('message for A')
+    chatStore.setCurrentChat('chat-b', 'atri')
+    chatStore.replaceTimelineItems([{
+      kind: 'message',
+      id: 'message-b',
+      chat_id: 'chat-b',
+      role: 'human',
+      content: 'existing B message',
+      timestamp: '2026-07-12T00:00:00.000Z'
+    }])
+
+    resolveCapture?.(IMAGE)
+
+    expect(await submission).toBe(true)
+    expect(mocks.sendText).toHaveBeenCalledWith(expect.objectContaining({
+      text: 'message for A',
+      chatId: 'chat-a',
+      characterId: 'atri'
+    }))
+    expect(chatStore.timelineItems).toEqual([
+      expect.objectContaining({
+        chat_id: 'chat-b',
+        content: 'existing B message'
+      })
+    ])
+  })
+
   it('sends text exactly once when local capture is unavailable', async () => {
     mocks.captureForSubmission.mockResolvedValueOnce(undefined)
     const chat = useChat()

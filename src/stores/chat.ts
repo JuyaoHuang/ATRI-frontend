@@ -135,7 +135,12 @@ export const useChatStore = defineStore('chat', {
     },
 
     addMessage(message: Message) {
+      if (message.chat_id !== this.currentChatId) {
+        return false
+      }
+
       this.timelineItems.push({ ...message, kind: 'message' })
+      return true
     },
 
     replaceTimelineItems(items: ChatTimelineItem[]) {
