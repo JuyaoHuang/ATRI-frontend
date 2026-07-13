@@ -294,7 +294,10 @@ function defaultParameterValue(key: keyof Live2DModelParameters) {
       <Checkbox v-model="expressionEnabledModel" />
     </div>
 
-    <div class="py-2 text-xs text-neutral-500 dark:text-neutral-400">
+    <div
+      v-if="!live2dStore.expressionEnabled"
+      class="py-2 text-xs text-neutral-500 dark:text-neutral-400"
+    >
       开启后，AI 文本回复中的表情标记可以切换 Live2D 模型表情；关闭后，模型使用自身的基础表情，并保留 SDK 原生动作和眨眼行为。
     </div>
 
