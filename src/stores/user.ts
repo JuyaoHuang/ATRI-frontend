@@ -7,6 +7,7 @@ import {
   getStoredSignedInAt,
   setStoredSignedInAt
 } from '@/utils/authToken'
+import { clearMarkdownRenderCache } from '@/utils/markdownRenderCache'
 
 export interface UserSettings {
   nickname: string
@@ -94,6 +95,9 @@ export const useUserStore = defineStore('user', {
         this.auth.enabled = status.enabled
 
         if (!status.enabled) {
+          if (authIdentity(this.auth.user) !== authIdentity(DEFAULT_AUTH_USER)) {
+            clearMarkdownRenderCache()
+          }
           this.auth.user = DEFAULT_AUTH_USER
           return this.auth
         }
@@ -102,6 +106,7 @@ export const useUserStore = defineStore('user', {
           await this.fetchCurrentUser()
         } catch {
           const hadSession = Boolean(this.auth.signedInAt)
+          clearMarkdownRenderCache()
           clearStoredAuthState()
           this.auth.signedInAt = null
           this.auth.user = null
@@ -109,6 +114,9 @@ export const useUserStore = defineStore('user', {
         }
       } catch (error) {
         this.auth.enabled = false
+        if (authIdentity(this.auth.user) !== authIdentity(DEFAULT_AUTH_USER)) {
+          clearMarkdownRenderCache()
+        }
         this.auth.user = DEFAULT_AUTH_USER
         this.auth.error = getErrorMessage(error)
       } finally {
@@ -121,6 +129,9 @@ export const useUserStore = defineStore('user', {
 
     async fetchCurrentUser() {
       const user = await authApi.me()
+      if (authIdentity(this.auth.user) !== authIdentity(user)) {
+        clearMarkdownRenderCache()
+      }
       this.auth.user = user
       this.auth.enabled = user.auth_enabled
       return user
@@ -136,6 +147,9 @@ export const useUserStore = defineStore('user', {
         this.auth.enabled = response.enabled
 
         if (!response.enabled) {
+          if (authIdentity(this.auth.user) !== authIdentity(DEFAULT_AUTH_USER)) {
+            clearMarkdownRenderCache()
+          }
           this.auth.user = DEFAULT_AUTH_USER
           return null
         }
@@ -164,6 +178,7 @@ export const useUserStore = defineStore('user', {
       try {
         return await this.fetchCurrentUser()
       } catch (error) {
+        clearMarkdownRenderCache()
         clearStoredAuthState()
         this.auth.signedInAt = null
         this.auth.user = null
@@ -183,6 +198,7 @@ export const useUserStore = defineStore('user', {
       } catch (error) {
         console.error('Failed to call logout endpoint:', error)
       } finally {
+        clearMarkdownRenderCache()
         clearStoredAuthState()
         this.auth.signedInAt = null
         this.auth.user = this.auth.enabled ? null : DEFAULT_AUTH_USER
@@ -216,6 +232,13 @@ function saveSettings(settings: UserSettings) {
 
 function getErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error)
+}
+
+function authIdentity(user: AuthUserResponse | null): string {
+  if (!user) {
+    return 'signed-out'
+  }
+  return `${user.auth_enabled ? 'authenticated' : 'local'}:${user.username}`
 }
 
 function createLoginState() {

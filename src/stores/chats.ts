@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import type { Chat } from '@/types/chat'
 import { chatsApi } from '@/api/chats'
 import { createTemporaryChatTitle } from '@/utils/chatTitle'
+import { clearMarkdownRenderCache } from '@/utils/markdownRenderCache'
 
 const deferredTitleTimers = new Map<string, number>()
 
@@ -151,6 +152,7 @@ export const useChatsStore = defineStore('chats', {
           deferredTitleTimers.delete(chatId)
         }
         await chatsApi.delete(chatId)
+        clearMarkdownRenderCache()
 
         // 从列表中移除
         this.chatList = this.chatList.filter((chat) => chat.id !== chatId)
