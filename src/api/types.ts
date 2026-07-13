@@ -46,7 +46,6 @@ export interface Live2DModelResponse {
   model_url: string
   thumbnail_url?: string | null
   expressions: string[]
-  created_at: string
   is_default: boolean
 }
 

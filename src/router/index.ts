@@ -135,7 +135,7 @@ const settingsChildren: RouteRecordRaw[] = [
     meta: createSettingsMeta({
       order: 5,
       title: '角色模型',
-      description: '启用 Live2D 舞台、管理模型资源，并调整模型在主页中的位置与尺寸。',
+      description: '选择管理员已安装的 Live2D 模型，并调整主页舞台中的位置与尺寸。',
       icon: 'i-solar:database-bold-duotone',
       phase: 'Phase 8',
       status: 'active',

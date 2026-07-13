@@ -11,7 +11,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'pick', value: string | undefined): void
+  (e: 'pick', value: string): void
 }>()
 
 const showDialog = defineModel<boolean>('show', { default: false })

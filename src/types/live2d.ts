@@ -5,7 +5,6 @@ export interface Live2DModel {
   modelUrl: string
   thumbnailUrl?: string
   expressions: string[]
-  createdAt: string
   isDefault: boolean
 }
 
@@ -17,17 +16,6 @@ export interface Live2DPosition {
 export interface Live2DExpressionRequest {
   name: string | null
   token: number
-}
-
-export interface Live2DMotion {
-  motionName: string
-  motionIndex: number
-  fileName: string
-}
-
-export interface Live2DMotionSelection {
-  group: string
-  index?: number
 }
 
 export type Live2DExpressionLlmMode = 'all' | 'none' | 'custom'

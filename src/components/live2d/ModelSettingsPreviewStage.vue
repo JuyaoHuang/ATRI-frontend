@@ -3,7 +3,6 @@ import { useMouse } from '@vueuse/core'
 import { computed, ref, watch } from 'vue'
 
 import type { ModelSettingsRuntimeSnapshot } from './runtime'
-import type { Live2DMotion } from '@/types/live2d'
 
 import Live2DCanvas from './Live2DCanvas.vue'
 import { createEmptyModelSettingsRuntimeSnapshot, resolveComponentStateToRuntimePhase } from './runtime'
@@ -57,9 +56,6 @@ watch(
   (modelUrl) => {
     componentState.value = modelUrl ? 'loading' : 'pending'
     lastError.value = undefined
-    if (!modelUrl) {
-      live2dStore.setAvailableMotions([])
-    }
   },
   { immediate: true },
 )
@@ -71,10 +67,6 @@ function handleModelLoaded() {
 
 function handleModelError(message: string) {
   lastError.value = message
-}
-
-function handleMotionsLoaded(motions: Live2DMotion[]) {
-  live2dStore.setAvailableMotions(motions)
 }
 
 async function capturePreviewFrame() {
@@ -90,8 +82,6 @@ defineExpose({
   <div :class="live2dSceneClassList">
     <Live2DCanvas
       ref="live2dSceneRef"
-      :model-id="live2dStore.activeModel?.id"
-      :model-path="live2dStore.activeModel?.modelPath"
       :model-url="live2dStore.activeModel?.modelUrl"
       :position="live2dStore.position"
       :scale="live2dStore.scale"
@@ -99,19 +89,15 @@ defineExpose({
       :model-parameters="live2dStore.modelParameters"
       :focus-at="{ x: positionCursor.x.value, y: positionCursor.y.value }"
       :disable-focus="live2dStore.disableFocus"
-      :idle-animation-enabled="live2dStore.idleAnimationEnabled"
-      :current-motion="live2dStore.currentMotion"
       :expression-system-enabled="live2dStore.expressionEnabled"
       :auto-blink-enabled="live2dStore.autoBlinkEnabled"
       :force-auto-blink-enabled="live2dStore.forceAutoBlinkEnabled"
       :shadow-enabled="live2dStore.shadowEnabled"
       :max-fps="live2dStore.maxFps"
       :resolution="live2dStore.renderScale"
-      :model-cache-version="live2dStore.modelCacheVersion"
       empty-text="No current model."
       @loaded="handleModelLoaded"
       @error="handleModelError"
-      @motions-loaded="handleMotionsLoaded"
     />
   </div>
 </template>

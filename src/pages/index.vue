@@ -85,25 +85,20 @@ watch(isLive2dMode, (enabled) => {
         <div class="stage-page-body">
           <div class="stage-widget">
             <Live2DCanvas
-              :model-id="live2dStore.activeModel?.id"
-              :model-path="live2dStore.activeModel?.modelPath"
               :model-url="live2dStore.activeModel?.modelUrl"
               :position="stageModelPosition"
               :scale="live2dStore.scale"
               :expression-request="live2dStore.expressionRequest"
-              :current-motion="live2dStore.currentMotion"
               :model-parameters="live2dStore.modelParameters"
               :focus-at="{ x: mouse.x.value, y: mouse.y.value }"
               :disable-focus="live2dStore.disableFocus"
-              :idle-animation-enabled="live2dStore.idleAnimationEnabled"
               :expression-system-enabled="live2dStore.expressionEnabled"
               :auto-blink-enabled="live2dStore.autoBlinkEnabled"
               :force-auto-blink-enabled="live2dStore.forceAutoBlinkEnabled"
               :shadow-enabled="live2dStore.shadowEnabled"
               :max-fps="live2dStore.maxFps"
               :resolution="live2dStore.renderScale"
-              :model-cache-version="live2dStore.modelCacheVersion"
-              empty-text="No available Live2D model. Import one in /settings/models to enable the stage."
+              empty-text="No available Live2D model. Ask the server administrator to install one."
             />
           </div>
 

@@ -3,3 +3,4 @@ node_modules
 *.config.js
 *.config.ts
 public/assets/js/CubismSdkForWeb-5-r.3/Core/live2dcubismcore.min.js
+public/assets/js/CubismSdkForWeb-2.1/live2d.min.js

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 
 import type { ModelSettingsRuntimeSnapshot } from './runtime'
 import type { Live2DModelParameters } from '@/stores/live2d'
@@ -27,7 +27,6 @@ defineEmits<{
 }>()
 
 const live2dStore = useLive2dStore()
-const clearingCache = ref(false)
 
 const fpsOptions = [
   { value: 0, label: '无限制' },
@@ -50,15 +49,31 @@ const SECTION_ICONS = {
 
 const canExtractColors = computed(() => props.runtimeSnapshot.canCapturePreview)
 const expressionNames = computed(() => live2dStore.expressionGroups)
-const runtimeMotionOptions = computed(() => live2dStore.availableMotions.map(motion => ({
-  label: motion.fileName.split('/').pop() || motion.fileName,
-  value: motion.fileName,
-  description: motion.fileName,
-})))
+const MODEL_DEFAULT_EXPRESSION_VALUE = '__atri_model_default_expression__'
+const defaultExpressionOptions = computed(() => [
+  {
+    label: '模型默认表情',
+    value: MODEL_DEFAULT_EXPRESSION_VALUE,
+    description: '不叠加命名表情，使用模型自身的基础状态。',
+  },
+  ...expressionNames.value.map(expressionName => ({
+    label: expressionName,
+    value: expressionName,
+  })),
+])
 
-const selectedRuntimeMotionPathModel = computed({
-  get: () => live2dStore.selectedRuntimeMotionPath,
-  set: value => live2dStore.setSelectedRuntimeMotion(value),
+const defaultExpressionModel = computed({
+  get: () => live2dStore.savedExpressionDefaults[0] ?? MODEL_DEFAULT_EXPRESSION_VALUE,
+  set: (value: string) => {
+    live2dStore.setDefaultExpression(
+      value === MODEL_DEFAULT_EXPRESSION_VALUE ? null : value,
+    )
+  },
+})
+
+const expressionEnabledModel = computed({
+  get: () => live2dStore.expressionEnabled,
+  set: (value: boolean) => live2dStore.setExpressionEnabled(value),
 })
 
 const parameterGroups = computed(() => [
@@ -120,19 +135,6 @@ function defaultParameterValue(key: keyof Live2DModelParameters) {
   return DEFAULT_MODEL_PARAMETERS[key]
 }
 
-function isGroupActive(name: string) {
-  return live2dStore.activeExpressions.includes(name)
-}
-
-async function handleClearModelCache() {
-  clearingCache.value = true
-  try {
-    await live2dStore.clearModelCache()
-  }
-  finally {
-    clearingCache.value = false
-  }
-}
 </script>
 
 <template>
@@ -213,20 +215,6 @@ async function handleClearModelCache() {
       label="渲染精度"
     />
 
-    <FieldComboboxSelect
-      v-model="selectedRuntimeMotionPathModel"
-      label="Idle Animation"
-      description="选择一个动作作为模型待机动作。"
-      :options="runtimeMotionOptions"
-      placeholder="选择动作"
-      :select-class="['w-full']"
-      :content-min-width="256"
-    >
-      <template #empty>
-        当前模型没有可用动作
-      </template>
-    </FieldComboboxSelect>
-
     <label class="flex flex-col gap-4">
       <div class="flex items-center gap-2">
         <div class="flex-1">
@@ -258,16 +246,6 @@ async function handleClearModelCache() {
 
     <Button variant="secondary" class="mt-4 w-full" @click="live2dStore.resetModelParameters()">
       Reset To Default Parameters
-    </Button>
-
-    <Button
-      variant="secondary"
-      class="mt-2 w-full"
-      :disabled="clearingCache"
-      :loading="clearingCache"
-      @click="handleClearModelCache"
-    >
-      Clear Model Cache
     </Button>
 
     <div
@@ -311,35 +289,35 @@ async function handleClearModelCache() {
     size="sm"
     inner-class="rounded-xl bg-white/80 dark:bg-black/75 backdrop-blur-lg"
   >
-      <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between">
       <span class="text-sm text-neutral-600 dark:text-neutral-400">表情系统</span>
-      <Checkbox v-model="live2dStore.expressionEnabled" />
+      <Checkbox v-model="expressionEnabledModel" />
     </div>
 
-    <div v-if="!live2dStore.expressionEnabled" class="py-2 text-xs text-neutral-500 dark:text-neutral-400">
-      关闭后将保留 SDK 原始表情管理器和眨眼行为。
+    <div
+      v-if="!live2dStore.expressionEnabled"
+      class="py-2 text-xs text-neutral-500 dark:text-neutral-400"
+    >
+      开启后，AI 文本回复中的表情标记可以切换 Live2D 模型表情；关闭后，模型使用自身的基础表情，并保留 SDK 原生动作和眨眼行为。
     </div>
 
-    <template v-else-if="expressionNames.length === 0">
+    <template v-if="live2dStore.expressionEnabled && expressionNames.length === 0">
       <div class="py-2 text-sm text-neutral-500 dark:text-neutral-400">
         当前模型没有可用表情。
       </div>
     </template>
 
-    <template v-else>
-      <div class="flex flex-col gap-2">
-        <div
-          v-for="expressionName in expressionNames"
-          :key="expressionName"
-          class="flex items-center justify-between"
-        >
-          <span class="text-sm text-neutral-700 dark:text-neutral-300">{{ expressionName }}</span>
-          <Checkbox
-            :model-value="isGroupActive(expressionName)"
-            @update:model-value="live2dStore.toggleExpression(expressionName)"
-          />
-        </div>
-      </div>
+    <template v-else-if="live2dStore.expressionEnabled">
+      <FieldComboboxSelect
+        v-model="defaultExpressionModel"
+        label="默认表情"
+        description="选择表情系统启用时优先使用的表情"
+        :options="defaultExpressionOptions"
+        placeholder="选择默认表情"
+        layout="vertical"
+        :select-class="['w-full']"
+        :content-min-width="256"
+      />
 
       <div class="mt-4 flex items-center gap-3">
         <span class="whitespace-nowrap text-sm text-neutral-600 dark:text-neutral-400">向 LLM 暴露</span>
@@ -366,15 +344,6 @@ async function handleClearModelCache() {
           />
         </div>
       </div>
-
-      <div class="airi-expression-actions">
-        <Button variant="secondary" @click="live2dStore.saveExpressionDefaults()">
-          Save Expression Defaults
-        </Button>
-        <Button variant="secondary" @click="live2dStore.resetAllExpressions()">
-          Reset All Expressions
-        </Button>
-      </div>
     </template>
   </AiriSection>
 </template>
@@ -389,13 +358,6 @@ async function handleClearModelCache() {
   font-size: 0.75rem;
   font-weight: 700;
   color: rgb(115 115 115);
-}
-
-.airi-expression-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  margin-top: 1rem;
 }
 
 .dark .parameter-group__title {
