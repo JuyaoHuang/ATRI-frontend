@@ -301,8 +301,6 @@ function playMessageSpeech() {
 }
 
 .message-text {
-  white-space: pre-wrap;
-  word-break: break-word;
   line-height: 1.6;
 }
 

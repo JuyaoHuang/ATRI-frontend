@@ -41,6 +41,11 @@ const rendered = computed(() => renderMarkdownWithCache(props.source, renderMark
   word-break: break-word;
 }
 
+.markdown-content__rendered {
+  /* Markdown-It leaves soft line breaks as whitespace when breaks is false. */
+  white-space: normal;
+}
+
 .markdown-content__rendered :deep(> :first-child) {
   margin-top: 0;
 }

@@ -5,6 +5,7 @@ import { renderToString } from 'vue/server-renderer'
 import { beforeEach, describe, expect, it } from 'vitest'
 
 import MarkdownContent from '@/components/chat/MarkdownContent.vue'
+import markdownContentSource from '@/components/chat/MarkdownContent.vue?raw'
 import { clearMarkdownRenderCache, getMarkdownRenderCacheStats } from '@/utils/markdownRenderCache'
 
 async function renderContent(source: string): Promise<string> {
@@ -26,6 +27,22 @@ describe('MarkdownContent', () => {
     expect(html).toContain('<strong>bold</strong>')
     expect(html).toContain('class="katex"')
     expect(html).toContain('<math')
+  })
+
+  it('keeps Markdown soft line breaks out of the generated element tree', async () => {
+    const html = await renderContent('first line\nsecond line')
+
+    expect(html).toContain('first line\nsecond line')
+    expect(html).not.toContain('<br')
+  })
+
+  it('defines separate whitespace behavior for Markdown and plain fallback', () => {
+    expect(markdownContentSource).toMatch(
+      /\.markdown-content__rendered\s*\{[^}]*white-space:\s*normal;/s
+    )
+    expect(markdownContentSource).toMatch(
+      /\.markdown-content__fallback\s*\{[^}]*white-space:\s*pre-wrap;/s
+    )
   })
 
   it('reuses sanitized HTML across component instances', async () => {
