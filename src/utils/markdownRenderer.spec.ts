@@ -3,6 +3,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  MAX_KATEX_EXPANSIONS,
+  MAX_KATEX_SIZE_EM,
   MAX_MARKDOWN_SOURCE_CHARS,
   isSafeMarkdownLink,
   renderMarkdown,
@@ -109,6 +111,24 @@ describe('renderMarkdown', () => {
     expect(definingMessage.textContent).toContain('isolated')
     expect(separateMessage.textContent).toContain('\\chatmacro')
     expect(separateMessage.textContent).not.toContain('isolated')
+  })
+
+  it('bounds oversized layout rules and recursive macro expansion', () => {
+    const oversizedRule = parseHtml(renderHtml('$\\rule{500em}{500em}$'))
+    const recursiveMacro = parseHtml(renderHtml('$\\def\\loop{\\loop}\\loop$'))
+    const layoutStyles = [...oversizedRule.querySelectorAll<HTMLElement>('[style]')]
+      .map(element => element.getAttribute('style'))
+
+    expect(MAX_KATEX_SIZE_EM).toBe(50)
+    expect(MAX_KATEX_EXPANSIONS).toBe(1_000)
+    expect(layoutStyles.some(style => style?.includes('500em'))).toBe(false)
+    expect(layoutStyles.some(style => style?.includes('50em'))).toBe(true)
+    expect(oversizedRule.querySelector('mspace')?.getAttribute('width')).toBe('50em')
+    expect(oversizedRule.querySelector('mspace')?.getAttribute('height')).toBe('50em')
+    expect(recursiveMacro.querySelector('.katex-error')?.getAttribute('title'))
+      .toContain('Too many expansions')
+    expect(recursiveMacro.textContent).toContain('\\def\\loop')
+    expect(recursiveMacro.querySelector('script, img, iframe')).toBeNull()
   })
 
   it('disables raw HTML, images, media and active KaTeX trust commands', () => {

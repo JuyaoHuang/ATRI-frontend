@@ -22,8 +22,8 @@ export type MarkdownRenderResult =
 export const MAX_MARKDOWN_SOURCE_CHARS = 200_000
 export const MAX_RENDERED_HTML_CHARS = 2_000_000
 
-const MAX_KATEX_EXPANSIONS = 1_000
-const MAX_KATEX_SIZE_EM = 50
+export const MAX_KATEX_EXPANSIONS = 1_000
+export const MAX_KATEX_SIZE_EM = 50
 
 const EXPLICIT_SAFE_PROTOCOL_RE = /^(?:https?:|mailto:)/i
 const URL_SCHEME_RE = /^[a-z][a-z\d+.-]*:/i
