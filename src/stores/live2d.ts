@@ -385,10 +385,6 @@ export const useLive2dStore = defineStore('live2d', () => {
     savedExpressionDefaults.value = [...activeExpressions.value]
   }
 
-  function resetAllExpressions() {
-    requestExpression(savedExpressionDefaults.value[0] || null)
-  }
-
   function parseAndApplyExpression(text: string) {
     const parsed = extractLive2dExpression(text)
     if (parsed.expression) {
@@ -438,7 +434,6 @@ export const useLive2dStore = defineStore('live2d', () => {
     resetModelParameters,
     requestExpression,
     setDefaultExpression,
-    resetAllExpressions,
     parseAndApplyExpression,
   }
 })

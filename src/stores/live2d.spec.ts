@@ -5,6 +5,9 @@ import { live2dApi } from '@/api/live2d'
 import type { Live2DModelResponse } from '@/api/types'
 import { useLive2dStore } from '@/stores/live2d'
 
+const TEST_PRIMARY_EXPRESSION = 'ExpressionAlpha'
+const TEST_TEMPORARY_EXPRESSION = 'ExpressionBeta'
+
 vi.mock('@/api/live2d', () => ({
   live2dApi: {
     list: vi.fn(),
@@ -171,27 +174,33 @@ describe('live2d store model selection', () => {
     expect('setIdleAnimationEnabled' in store).toBe(false)
   })
 
-  it('canonicalizes and immediately applies a selected default expression', async () => {
-    vi.mocked(live2dApi.list).mockResolvedValue([
-      model('expressive', true, ['F_FUN', 'F_SAD']),
-    ])
+  it('does not expose a redundant default-expression reset action', () => {
     const store = useLive2dStore()
-    await store.fetchModels()
 
-    store.setDefaultExpression('f_fun')
-
-    expect(store.activeExpressions).toEqual(['F_FUN'])
-    expect(store.savedExpressionDefaults).toEqual(['F_FUN'])
-    expect(store.expressionRequest.name).toBe('F_FUN')
+    expect('resetAllExpressions' in store).toBe(false)
   })
 
-  it('uses the model expression when the saved default is cleared', async () => {
+  it('canonicalizes and immediately applies a selected default expression', async () => {
     vi.mocked(live2dApi.list).mockResolvedValue([
-      model('expressive', true, ['F_FUN']),
+      model('expressive', true, [TEST_PRIMARY_EXPRESSION, TEST_TEMPORARY_EXPRESSION]),
     ])
     const store = useLive2dStore()
     await store.fetchModels()
-    store.setDefaultExpression('F_FUN')
+
+    store.setDefaultExpression(TEST_PRIMARY_EXPRESSION.toLowerCase())
+
+    expect(store.activeExpressions).toEqual([TEST_PRIMARY_EXPRESSION])
+    expect(store.savedExpressionDefaults).toEqual([TEST_PRIMARY_EXPRESSION])
+    expect(store.expressionRequest.name).toBe(TEST_PRIMARY_EXPRESSION)
+  })
+
+  it('uses the model base state when the saved default is cleared', async () => {
+    vi.mocked(live2dApi.list).mockResolvedValue([
+      model('expressive', true, [TEST_PRIMARY_EXPRESSION]),
+    ])
+    const store = useLive2dStore()
+    await store.fetchModels()
+    store.setDefaultExpression(TEST_PRIMARY_EXPRESSION)
 
     store.setDefaultExpression(null)
 
@@ -202,49 +211,56 @@ describe('live2d store model selection', () => {
 
   it('keeps the saved default when a temporary expression is requested', async () => {
     vi.mocked(live2dApi.list).mockResolvedValue([
-      model('expressive', true, ['F_FUN', 'F_SAD']),
+      model('expressive', true, [TEST_PRIMARY_EXPRESSION, TEST_TEMPORARY_EXPRESSION]),
     ])
     const store = useLive2dStore()
     await store.fetchModels()
-    store.setDefaultExpression('F_FUN')
+    store.setDefaultExpression(TEST_PRIMARY_EXPRESSION)
 
-    store.requestExpression('F_SAD')
+    store.requestExpression(TEST_TEMPORARY_EXPRESSION)
 
-    expect(store.activeExpressions).toEqual(['F_SAD'])
-    expect(store.savedExpressionDefaults).toEqual(['F_FUN'])
-    expect(store.expressionRequest.name).toBe('F_SAD')
+    expect(store.activeExpressions).toEqual([TEST_TEMPORARY_EXPRESSION])
+    expect(store.savedExpressionDefaults).toEqual([TEST_PRIMARY_EXPRESSION])
+    expect(store.expressionRequest.name).toBe(TEST_TEMPORARY_EXPRESSION)
   })
 
-  it('restores the saved default after a temporary expression', async () => {
+  it('suspends and restores the current expression when the system is toggled', async () => {
     vi.mocked(live2dApi.list).mockResolvedValue([
-      model('expressive', true, ['F_FUN', 'F_SAD']),
+      model('expressive', true, [TEST_PRIMARY_EXPRESSION, TEST_TEMPORARY_EXPRESSION]),
     ])
     const store = useLive2dStore()
     await store.fetchModels()
-    store.setDefaultExpression('F_FUN')
-    store.requestExpression('F_SAD')
+    store.setDefaultExpression(TEST_PRIMARY_EXPRESSION)
+    store.requestExpression(TEST_TEMPORARY_EXPRESSION)
 
-    store.resetAllExpressions()
+    store.setExpressionEnabled(false)
 
-    expect(store.activeExpressions).toEqual(['F_FUN'])
-    expect(store.savedExpressionDefaults).toEqual(['F_FUN'])
-    expect(store.expressionRequest.name).toBe('F_FUN')
+    expect(store.expressionEnabled).toBe(false)
+    expect(store.expressionRequest.name).toBeNull()
+    expect(store.activeExpressions).toEqual([TEST_TEMPORARY_EXPRESSION])
+    expect(store.savedExpressionDefaults).toEqual([TEST_PRIMARY_EXPRESSION])
+
+    store.setExpressionEnabled(true)
+
+    expect(store.expressionEnabled).toBe(true)
+    expect(store.expressionRequest.name).toBe(TEST_TEMPORARY_EXPRESSION)
+    expect(store.savedExpressionDefaults).toEqual([TEST_PRIMARY_EXPRESSION])
   })
 
   it('normalizes legacy multi-expression defaults to one saved value', async () => {
     localStorage.setItem('atri-live2d-settings', JSON.stringify({
       activeModelId: 'expressive',
-      savedExpressionDefaults: ['F_SAD', 'F_FUN'],
+      savedExpressionDefaults: [TEST_TEMPORARY_EXPRESSION, TEST_PRIMARY_EXPRESSION],
     }))
     vi.mocked(live2dApi.list).mockResolvedValue([
-      model('expressive', true, ['F_FUN', 'F_SAD']),
+      model('expressive', true, [TEST_PRIMARY_EXPRESSION, TEST_TEMPORARY_EXPRESSION]),
     ])
     const store = useLive2dStore()
 
     await store.fetchModels()
 
-    expect(store.savedExpressionDefaults).toEqual(['F_SAD'])
-    expect(store.activeExpressions).toEqual(['F_SAD'])
-    expect(store.expressionRequest.name).toBe('F_SAD')
+    expect(store.savedExpressionDefaults).toEqual([TEST_TEMPORARY_EXPRESSION])
+    expect(store.activeExpressions).toEqual([TEST_TEMPORARY_EXPRESSION])
+    expect(store.expressionRequest.name).toBe(TEST_TEMPORARY_EXPRESSION)
   })
 })

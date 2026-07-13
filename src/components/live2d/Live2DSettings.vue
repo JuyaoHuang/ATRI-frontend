@@ -54,7 +54,7 @@ const defaultExpressionOptions = computed(() => [
   {
     label: '模型默认表情',
     value: MODEL_DEFAULT_EXPRESSION_VALUE,
-    description: '使用模型自身定义的默认表情。',
+    description: '不叠加命名表情，使用模型自身的基础状态。',
   },
   ...expressionNames.value.map(expressionName => ({
     label: expressionName,
@@ -69,6 +69,11 @@ const defaultExpressionModel = computed({
       value === MODEL_DEFAULT_EXPRESSION_VALUE ? null : value,
     )
   },
+})
+
+const expressionEnabledModel = computed({
+  get: () => live2dStore.expressionEnabled,
+  set: (value: boolean) => live2dStore.setExpressionEnabled(value),
 })
 
 const parameterGroups = computed(() => [
@@ -284,26 +289,26 @@ function defaultParameterValue(key: keyof Live2DModelParameters) {
     size="sm"
     inner-class="rounded-xl bg-white/80 dark:bg-black/75 backdrop-blur-lg"
   >
-      <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between">
       <span class="text-sm text-neutral-600 dark:text-neutral-400">表情系统</span>
-      <Checkbox v-model="live2dStore.expressionEnabled" />
+      <Checkbox v-model="expressionEnabledModel" />
     </div>
 
-    <div v-if="!live2dStore.expressionEnabled" class="py-2 text-xs text-neutral-500 dark:text-neutral-400">
-      关闭后将保留 SDK 原始表情管理器和眨眼行为。
+    <div class="py-2 text-xs text-neutral-500 dark:text-neutral-400">
+      开启后，AI 文本回复中的表情标记可以切换 Live2D 模型表情；关闭后，模型使用自身的基础表情，并保留 SDK 原生动作和眨眼行为。
     </div>
 
-    <template v-else-if="expressionNames.length === 0">
+    <template v-if="live2dStore.expressionEnabled && expressionNames.length === 0">
       <div class="py-2 text-sm text-neutral-500 dark:text-neutral-400">
         当前模型没有可用表情。
       </div>
     </template>
 
-    <template v-else>
+    <template v-else-if="live2dStore.expressionEnabled">
       <FieldComboboxSelect
         v-model="defaultExpressionModel"
         label="默认表情"
-        description="选择表情系统启用时优先使用的表情。聊天消息的临时表情不会改写此选项。"
+        description="选择表情系统启用时优先使用的表情"
         :options="defaultExpressionOptions"
         placeholder="选择默认表情"
         layout="vertical"
@@ -336,10 +341,6 @@ function defaultParameterValue(key: keyof Live2DModelParameters) {
           />
         </div>
       </div>
-
-      <Button variant="secondary" class="mt-4 w-full" @click="live2dStore.resetAllExpressions()">
-        恢复默认表情
-      </Button>
     </template>
   </AiriSection>
 </template>

@@ -34,6 +34,14 @@ interface Props {
   emptyText?: string
 }
 
+interface Live2DExpressionManager {
+  currentExpression?: unknown
+  expressions?: unknown[]
+  getExpressionIndex?: (name: string) => number
+  resetExpression?: () => void
+  restoreExpression?: () => void
+}
+
 const props = withDefaults(defineProps<Props>(), {
   modelUrl: null,
   position: () => ({ x: 0, y: 0 }),
@@ -429,16 +437,33 @@ const applyExpression = async () => {
     return
   }
 
-  const motionManager = (model.value.internalModel as { motionManager?: { resetExpression?: () => void } }).motionManager
+  const expressionManager = (
+    model.value.internalModel.motionManager as {
+      expressionManager?: Live2DExpressionManager
+    }
+  ).expressionManager
 
   if (!props.expressionSystemEnabled) {
-    motionManager?.resetExpression?.()
+    expressionManager?.resetExpression?.()
     return
   }
 
   const expressionName = props.expressionRequest?.name
   if (!expressionName) {
-    motionManager?.resetExpression?.()
+    expressionManager?.resetExpression?.()
+    return
+  }
+
+  const requestedExpressionIndex = expressionManager?.getExpressionIndex?.(expressionName)
+  const currentExpressionIndex = expressionManager?.expressions?.indexOf(
+    expressionManager.currentExpression,
+  )
+  if (
+    requestedExpressionIndex !== undefined
+    && requestedExpressionIndex >= 0
+    && requestedExpressionIndex === currentExpressionIndex
+  ) {
+    expressionManager?.restoreExpression?.()
     return
   }
 
