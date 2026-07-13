@@ -242,6 +242,33 @@ function scrollContainer(harness: TimelineHarness): HTMLElement {
   return container
 }
 
+async function settleInitialTail(harness: TimelineHarness): Promise<void> {
+  await settleTimeline()
+  const container = scrollContainer(harness)
+  let stableFrames = 0
+
+  for (let frame = 0; frame < 30; frame += 1) {
+    await new Promise<void>(resolve => {
+      if (typeof requestAnimationFrame === 'function') {
+        requestAnimationFrame(() => resolve())
+      } else {
+        setTimeout(resolve, 0)
+      }
+    })
+    await nextTick()
+
+    const distanceFromTail = container.scrollHeight
+      - container.clientHeight
+      - container.scrollTop
+    stableFrames = distanceFromTail <= 32 ? stableFrames + 1 : 0
+    if (stableFrames >= 3) {
+      return
+    }
+  }
+
+  throw new Error('Initial tail scroll did not settle')
+}
+
 describe('VirtualChatTimeline', () => {
   const mountedApps: TimelineHarness[] = []
 
@@ -267,7 +294,7 @@ describe('VirtualChatTimeline', () => {
     const harness = track(mountTimeline(
       Array.from({ length: 1_000 }, (_, index) => message(index))
     ))
-    await settleTimeline()
+    await settleInitialTail(harness)
 
     const mountedRows = harness.host.querySelectorAll('.virtual-chat-row')
     const mountedMessages = harness.host.querySelectorAll('.message-item')
@@ -284,7 +311,7 @@ describe('VirtualChatTimeline', () => {
     const harness = track(mountTimeline(
       Array.from({ length: 200 }, (_, index) => message(index))
     ))
-    await settleTimeline()
+    await settleInitialTail(harness)
     const container = scrollContainer(harness)
 
     container.scrollTop = 2_000
@@ -308,7 +335,7 @@ describe('VirtualChatTimeline', () => {
     const harness = track(mountTimeline(
       Array.from({ length: 100 }, (_, index) => message(index))
     ))
-    await settleTimeline()
+    await settleInitialTail(harness)
     const container = scrollContainer(harness)
 
     container.scrollTop = Math.max(container.scrollHeight - container.clientHeight, 0)
@@ -326,7 +353,7 @@ describe('VirtualChatTimeline', () => {
     const harness = track(mountTimeline(
       Array.from({ length: 160 }, (_, index) => message(index))
     ))
-    await settleTimeline()
+    await settleInitialTail(harness)
     const container = scrollContainer(harness)
     const hitsBeforeRemount = getMarkdownRenderCacheStats().hits
 
@@ -344,7 +371,7 @@ describe('VirtualChatTimeline', () => {
     const harness = track(mountTimeline(
       Array.from({ length: 200 }, (_, index) => message(index))
     ))
-    await settleTimeline()
+    await settleInitialTail(harness)
     const container = scrollContainer(harness)
 
     container.scrollTop = 4_000
@@ -366,30 +393,28 @@ describe('VirtualChatTimeline', () => {
     const harness = track(mountTimeline(
       Array.from({ length: 120 }, (_, index) => message(index))
     ))
-    await settleTimeline()
+    await settleInitialTail(harness)
     const container = scrollContainer(harness)
 
     container.scrollTop = 3_000
     container.dispatchEvent(new Event('scroll'))
     await settleTimeline()
-    const anchorKey = harness.host.querySelector('.virtual-chat-row')
-      ?.getAttribute('data-chat-message-key')
-    expect(anchorKey).toBeTruthy()
+    const anchorBefore = viewportAnchor(harness)
 
     const older = Array.from({ length: 10 }, (_, index) => message(index, 'older'))
     harness.items.value = [...older, ...harness.items.value]
     await settleTimeline()
-    const visibleKeys = [...harness.host.querySelectorAll('.virtual-chat-row')]
-      .map(row => row.getAttribute('data-chat-message-key'))
+    const anchorAfter = viewportAnchor(harness)
 
-    expect(visibleKeys).toContain(anchorKey)
+    expect(anchorAfter.key).toBe(anchorBefore.key)
+    expect(Math.abs(anchorAfter.offset - anchorBefore.offset)).toBeLessThanOrEqual(8)
   })
 
   it('waits for the new chat history before performing its initial bottom scroll', async () => {
     const harness = track(mountTimeline(
       Array.from({ length: 80 }, (_, index) => message(index))
     ))
-    await settleTimeline()
+    await settleInitialTail(harness)
     const container = scrollContainer(harness)
 
     container.scrollTop = 1_200

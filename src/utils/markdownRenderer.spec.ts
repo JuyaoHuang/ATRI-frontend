@@ -6,6 +6,7 @@ import {
   MAX_KATEX_EXPANSIONS,
   MAX_KATEX_SIZE_EM,
   MAX_MARKDOWN_SOURCE_CHARS,
+  MAX_RENDERED_HTML_CHARS,
   isSafeMarkdownLink,
   renderMarkdown,
   type SanitizedHtml
@@ -194,6 +195,19 @@ describe('renderMarkdown', () => {
     const source = 'x'.repeat(MAX_MARKDOWN_SOURCE_CHARS + 1)
     const result = renderMarkdown(source)
 
+    expect(result).toEqual({
+      kind: 'plain',
+      text: source,
+      reason: 'too-large'
+    })
+  })
+
+  it('falls back before sanitization when rendered HTML exceeds its guard', () => {
+    const source = Array.from({ length: 6_000 }, () => '$x$').join(' ')
+    const result = renderMarkdown(source)
+
+    expect(source.length).toBeLessThan(MAX_MARKDOWN_SOURCE_CHARS)
+    expect(MAX_RENDERED_HTML_CHARS).toBe(2_000_000)
     expect(result).toEqual({
       kind: 'plain',
       text: source,
