@@ -36,14 +36,14 @@ function createMemoryStorage(): Storage {
   }
 }
 
-function model(id: string, isDefault = false): Live2DModelResponse {
+function model(id: string, isDefault = false, expressions: string[] = []): Live2DModelResponse {
   return {
     id,
     name: id,
     model_path: `runtime/${id}.model3.json`,
     model_url: `http://test/api/assets/live2d/${id}/runtime/${id}.model3.json`,
     thumbnail_url: null,
-    expressions: [],
+    expressions,
     is_default: isDefault,
   }
 }
@@ -150,5 +150,101 @@ describe('live2d store model selection', () => {
     expect('renameModel' in store).toBe(false)
     expect('deleteModel' in store).toBe(false)
     expect('uploading' in store).toBe(false)
+  })
+
+  it('does not expose custom model cache state or actions', () => {
+    const store = useLive2dStore()
+
+    expect('modelCacheVersion' in store).toBe(false)
+    expect('clearModelCache' in store).toBe(false)
+  })
+
+  it('does not expose manual motion state or actions', () => {
+    const store = useLive2dStore()
+
+    expect('availableMotions' in store).toBe(false)
+    expect('currentMotion' in store).toBe(false)
+    expect('selectedRuntimeMotionPath' in store).toBe(false)
+    expect('setAvailableMotions' in store).toBe(false)
+    expect('setSelectedRuntimeMotion' in store).toBe(false)
+    expect('idleAnimationEnabled' in store).toBe(false)
+    expect('setIdleAnimationEnabled' in store).toBe(false)
+  })
+
+  it('canonicalizes and immediately applies a selected default expression', async () => {
+    vi.mocked(live2dApi.list).mockResolvedValue([
+      model('expressive', true, ['F_FUN', 'F_SAD']),
+    ])
+    const store = useLive2dStore()
+    await store.fetchModels()
+
+    store.setDefaultExpression('f_fun')
+
+    expect(store.activeExpressions).toEqual(['F_FUN'])
+    expect(store.savedExpressionDefaults).toEqual(['F_FUN'])
+    expect(store.expressionRequest.name).toBe('F_FUN')
+  })
+
+  it('uses the model expression when the saved default is cleared', async () => {
+    vi.mocked(live2dApi.list).mockResolvedValue([
+      model('expressive', true, ['F_FUN']),
+    ])
+    const store = useLive2dStore()
+    await store.fetchModels()
+    store.setDefaultExpression('F_FUN')
+
+    store.setDefaultExpression(null)
+
+    expect(store.activeExpressions).toEqual([])
+    expect(store.savedExpressionDefaults).toEqual([])
+    expect(store.expressionRequest.name).toBeNull()
+  })
+
+  it('keeps the saved default when a temporary expression is requested', async () => {
+    vi.mocked(live2dApi.list).mockResolvedValue([
+      model('expressive', true, ['F_FUN', 'F_SAD']),
+    ])
+    const store = useLive2dStore()
+    await store.fetchModels()
+    store.setDefaultExpression('F_FUN')
+
+    store.requestExpression('F_SAD')
+
+    expect(store.activeExpressions).toEqual(['F_SAD'])
+    expect(store.savedExpressionDefaults).toEqual(['F_FUN'])
+    expect(store.expressionRequest.name).toBe('F_SAD')
+  })
+
+  it('restores the saved default after a temporary expression', async () => {
+    vi.mocked(live2dApi.list).mockResolvedValue([
+      model('expressive', true, ['F_FUN', 'F_SAD']),
+    ])
+    const store = useLive2dStore()
+    await store.fetchModels()
+    store.setDefaultExpression('F_FUN')
+    store.requestExpression('F_SAD')
+
+    store.resetAllExpressions()
+
+    expect(store.activeExpressions).toEqual(['F_FUN'])
+    expect(store.savedExpressionDefaults).toEqual(['F_FUN'])
+    expect(store.expressionRequest.name).toBe('F_FUN')
+  })
+
+  it('normalizes legacy multi-expression defaults to one saved value', async () => {
+    localStorage.setItem('atri-live2d-settings', JSON.stringify({
+      activeModelId: 'expressive',
+      savedExpressionDefaults: ['F_SAD', 'F_FUN'],
+    }))
+    vi.mocked(live2dApi.list).mockResolvedValue([
+      model('expressive', true, ['F_FUN', 'F_SAD']),
+    ])
+    const store = useLive2dStore()
+
+    await store.fetchModels()
+
+    expect(store.savedExpressionDefaults).toEqual(['F_SAD'])
+    expect(store.activeExpressions).toEqual(['F_SAD'])
+    expect(store.expressionRequest.name).toBe('F_SAD')
   })
 })
