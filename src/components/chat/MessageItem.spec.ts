@@ -1,13 +1,23 @@
 // @vitest-environment jsdom
 
 import { createPinia } from 'pinia'
-import { createSSRApp, h } from 'vue'
+import { createApp, createSSRApp, h, nextTick } from 'vue'
 import { renderToString } from 'vue/server-renderer'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import MessageItem from '@/components/chat/MessageItem.vue'
+import { useTTSStore } from '@/stores/tts'
 import type { Message } from '@/types/message'
 import { clearMarkdownRenderCache } from '@/utils/markdownRenderCache'
+
+const audioPlayerMock = vi.hoisted(() => ({
+  enqueueText: vi.fn(),
+  isBusy: { value: false }
+}))
+
+vi.mock('@/composables/useAudioPlayer', () => ({
+  useAudioPlayer: () => audioPlayerMock
+}))
 
 const BASE_MESSAGE: Message = {
   id: 'message-a',
@@ -38,6 +48,7 @@ function markdownInnerHtml(renderedComponent: string): string | undefined {
 describe('MessageItem Markdown rendering', () => {
   beforeEach(() => {
     clearMarkdownRenderCache()
+    audioPlayerMock.enqueueText.mockClear()
   })
 
   it('renders static AI and human messages with identical Markdown semantics', async () => {
@@ -65,6 +76,7 @@ describe('MessageItem Markdown rendering', () => {
   it('preserves interrupted status, name and timestamp presentation', async () => {
     const html = await renderMessage({
       ...BASE_MESSAGE,
+      avatar: 'atri.png',
       interrupted: true,
       interrupt_reason: 'vad'
     })
@@ -72,5 +84,35 @@ describe('MessageItem Markdown rendering', () => {
     expect(html).toContain('ATRI')
     expect(html).toContain('Interrupted')
     expect(html).toContain('message-time')
+    expect(html).toContain('src="/avatars/atri.png"')
+    expect(html).toContain('alt="ATRI"')
+  })
+
+  it('passes the original Markdown source to manual TTS playback', async () => {
+    const pinia = createPinia()
+    const ttsStore = useTTSStore(pinia)
+    ttsStore.config.enabled = true
+    const host = document.createElement('div')
+    const message = {
+      ...BASE_MESSAGE,
+      generation_id: 'generation-a'
+    }
+    const app = createApp({
+      render: () => h(MessageItem, { message })
+    })
+    app.use(pinia)
+    app.mount(host)
+
+    try {
+      await nextTick()
+      host.querySelector<HTMLButtonElement>('.message-speech-button')?.click()
+
+      expect(audioPlayerMock.enqueueText).toHaveBeenCalledWith(
+        BASE_MESSAGE.content,
+        { source: 'manual', generationId: 'generation-a' }
+      )
+    } finally {
+      app.unmount()
+    }
   })
 })
