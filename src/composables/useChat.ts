@@ -10,6 +10,7 @@ import { useChatsStore } from '@/stores/chats'
 import { useLive2dStore } from '@/stores/live2d'
 import { useWebSocket } from '@/composables/useWebSocket'
 import type { ChatMessageItem } from '@/types/message'
+import { createStableHistoryMessageIds } from '@/utils/chatMessageId'
 import { extractLive2dExpression } from '@/utils/live2dExpression'
 
 interface ClientDatetimeContext {
@@ -157,6 +158,7 @@ export function useChat() {
       }
 
       let lastAssistantExpression: string | null = null
+      const historyMessageIds = createStableHistoryMessageIds(chatId, response.messages)
       const historyItems: ChatMessageItem[] = response.messages.map((msg, index) => {
         // 如果是 AI 消息且有 name，从 characters store 获取 avatar
         let avatar: string | undefined
@@ -173,7 +175,7 @@ export function useChat() {
 
         return {
           kind: 'message',
-          id: `msg_${index}`,
+          id: historyMessageIds[index],
           chat_id: chatId,
           role: msg.role,
           content,

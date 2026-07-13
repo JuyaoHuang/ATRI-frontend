@@ -1,9 +1,9 @@
 import { computed } from 'vue'
 
 import { dataApi } from '@/api/data'
-import { chatsApi } from '@/api/chats'
 import { useChatStore } from '@/stores/chat'
 import { useChatsStore } from '@/stores/chats'
+import { clearMarkdownRenderCache } from '@/utils/markdownRenderCache'
 
 export function useDataCleanup() {
   const chatStore = useChatStore()
@@ -12,8 +12,7 @@ export function useDataCleanup() {
   const currentChatId = computed(() => chatStore.currentChatId)
 
   async function deleteChatSession(chatId: string, characterId: string) {
-    await chatsApi.delete(chatId)
-    chatsStore.chatList = chatsStore.chatList.filter(chat => chat.id !== chatId)
+    await chatsStore.deleteChat(chatId)
 
     if (chatStore.currentChatId === chatId) {
       const nextChat = chatsStore.chatList.find(chat => chat.character_id === characterId)
@@ -26,11 +25,15 @@ export function useDataCleanup() {
   }
 
   async function clearShortTermMemory(characterId: string, chatId: string) {
-    return dataApi.clearShortTermMemory(characterId, chatId)
+    const result = await dataApi.clearShortTermMemory(characterId, chatId)
+    clearMarkdownRenderCache()
+    return result
   }
 
   async function clearLongTermMemory(characterId: string) {
-    return dataApi.clearLongTermMemory(characterId)
+    const result = await dataApi.clearLongTermMemory(characterId)
+    clearMarkdownRenderCache()
+    return result
   }
 
   return {
