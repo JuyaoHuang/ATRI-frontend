@@ -26,6 +26,7 @@ vi.mock('@/api/chats', () => ({ chatsApi: chatsApiMock }))
 vi.mock('@/api/data', () => ({ dataApi: dataApiMock }))
 
 import { useDataCleanup } from '@/composables/useDataCleanup'
+import { useChatsStore } from '@/stores/chats'
 import { useUserStore } from '@/stores/user'
 import {
   clearMarkdownRenderCache,
@@ -117,6 +118,17 @@ describe('Markdown cache lifecycle', () => {
 
     populateCache('long memory')
     await cleanup.clearLongTermMemory('atri')
+    expect(getMarkdownRenderCacheStats().entries).toBe(0)
+  })
+
+  it('clears the cache after the shared chat deletion action succeeds', async () => {
+    const chatsStore = useChatsStore()
+    chatsApiMock.delete.mockResolvedValue(undefined)
+    populateCache('sidebar deleted chat')
+
+    await chatsStore.deleteChat('chat-a')
+
+    expect(chatsApiMock.delete).toHaveBeenCalledWith('chat-a')
     expect(getMarkdownRenderCacheStats().entries).toBe(0)
   })
 
