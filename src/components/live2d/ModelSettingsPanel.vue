@@ -52,10 +52,7 @@ onMounted(() => {
   >
     <Callout label="我们支持 2D 模型">
       <p>
-        点击 <strong>选择模型</strong> 可使用服务器管理员已经安装并通过校验的 Live2D 模型。
-      </p>
-      <p>
-        添加或移除模型需要管理员直接维护后端 <code>data/live2d/models/</code> 目录；普通用户不能在网页中上传、重命名或删除模型。
+        点击 <strong>选择模型</strong> 可使用已安装并通过校验的 Live2D 模型
       </p>
     </Callout>
 
