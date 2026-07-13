@@ -3,49 +3,42 @@ import { Application } from '@pixi/app'
 import { extensions } from '@pixi/extensions'
 import { InteractionManager } from '@pixi/interaction'
 import { Ticker, TickerPlugin } from '@pixi/ticker'
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { FileLoader, Live2DModel, MotionPriority } from 'pixi-live2d-display/cubism4'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
+import { Live2DModel, MotionPriority } from 'pixi-live2d-display'
 
+import { setLive2dCoreParameter } from './coreParameterAdapter'
+import type { Live2DCoreModel } from './coreParameterAdapter'
 import { createModelLoadTracker } from './modelLoadTracker'
+import { selectLive2dClickMotion } from './motionController'
+import type { Live2DMotionDefinitions } from './motionController'
 import type {
   Live2DExpressionRequest,
-  Live2DMotion,
-  Live2DMotionSelection,
   Live2DPosition,
 } from '@/types/live2d'
 import type { Live2DModelParameters } from '@/stores/live2d'
-import { loadLive2dFilesWithOpfs } from '@/utils/live2dOpfs'
 
 interface Props {
-  modelId?: string | null
-  modelPath?: string | null
   modelUrl?: string | null
   position?: Live2DPosition
   scale?: number
   expressionRequest?: Live2DExpressionRequest | null
-  currentMotion?: Live2DMotionSelection | null
   modelParameters?: Live2DModelParameters
   focusAt?: { x: number, y: number }
   disableFocus?: boolean
-  idleAnimationEnabled?: boolean
   expressionSystemEnabled?: boolean
   autoBlinkEnabled?: boolean
   forceAutoBlinkEnabled?: boolean
   shadowEnabled?: boolean
   maxFps?: number
   resolution?: number
-  modelCacheVersion?: number
   emptyText?: string
 }
 
 const props = withDefaults(defineProps<Props>(), {
-  modelId: null,
-  modelPath: null,
   modelUrl: null,
   position: () => ({ x: 0, y: 0 }),
   scale: 1,
   expressionRequest: null,
-  currentMotion: null,
   modelParameters: () => ({
     angleX: 0,
     angleY: 0,
@@ -72,28 +65,25 @@ const props = withDefaults(defineProps<Props>(), {
   }),
   focusAt: () => ({ x: 0, y: 0 }),
   disableFocus: false,
-  idleAnimationEnabled: true,
   expressionSystemEnabled: true,
   autoBlinkEnabled: true,
   forceAutoBlinkEnabled: false,
   shadowEnabled: true,
   maxFps: 60,
   resolution: 2,
-  modelCacheVersion: 0,
   emptyText: 'No current model.',
 })
 
 const emit = defineEmits<{
   error: [message: string]
   loaded: []
-  motionsLoaded: [motions: Live2DMotion[]]
 }>()
 
 let pixiExtensionsRegistered = false
 
 const containerRef = ref<HTMLDivElement | null>(null)
-const app = ref<Application | null>(null)
-const model = ref<Live2DModel | null>(null)
+const app = shallowRef<Application | null>(null)
+const model = shallowRef<Live2DModel | null>(null)
 const width = ref(0)
 const height = ref(0)
 const initialModelWidth = ref(1)
@@ -101,22 +91,10 @@ const initialModelHeight = ref(1)
 let resizeObserver: ResizeObserver | null = null
 let blinkTimer: number | null = null
 let blinkResetTimer: number | null = null
-let removeMotionFinishListener: (() => void) | null = null
+let removeHitListener: (() => void) | null = null
 const modelLoadTracker = createModelLoadTracker()
 
-const resolvedModelUrl = computed(() => {
-  if (!props.modelUrl) {
-    return null
-  }
-
-  if (!props.modelCacheVersion) {
-    return props.modelUrl
-  }
-
-  const url = new URL(props.modelUrl, window.location.origin)
-  url.searchParams.set('_live2d', String(props.modelCacheVersion))
-  return url.toString()
-})
+const resolvedModelUrl = computed(() => props.modelUrl || null)
 
 const hasModel = computed(() => Boolean(resolvedModelUrl.value))
 
@@ -166,30 +144,35 @@ const createPixiApp = async () => {
   app.value = nextApp
 }
 
-const clearMotionFinishListener = () => {
-  removeMotionFinishListener?.()
-  removeMotionFinishListener = null
+const clearHitListener = () => {
+  removeHitListener?.()
+  removeHitListener = null
 }
 
 const destroyModel = () => {
-  clearMotionFinishListener()
+  clearHitListener()
 
-  if (!model.value || !app.value) {
-    emit('motionsLoaded', [])
+  const currentModel = model.value
+  model.value = null
+
+  if (!currentModel) {
     return
   }
 
   try {
-    app.value.stage.removeChild(model.value as never)
-    model.value.destroy()
+    app.value?.stage.removeChild(currentModel as never)
   }
   catch (error) {
-    console.warn('卸载 Live2D 模型失败:', error)
+    console.warn('从舞台移除 Live2D 模型失败:', error)
   }
-  finally {
-    model.value = null
-    emit('motionsLoaded', [])
+
+  try {
+    currentModel.destroy()
   }
+  catch (error) {
+    console.warn('销毁 Live2D 模型失败:', error)
+  }
+
 }
 
 const stopBlinkLoop = () => {
@@ -243,11 +226,11 @@ const applyTransform = () => {
 }
 
 const getCoreModel = () => {
-  return (model.value?.internalModel as { coreModel?: { setParameterValueById: (id: string, value: number) => void } })?.coreModel
+  return (model.value?.internalModel as { coreModel?: Live2DCoreModel })?.coreModel
 }
 
 const setCoreParameter = (id: string, value: number) => {
-  getCoreModel()?.setParameterValueById(id, value)
+  setLive2dCoreParameter(getCoreModel(), id, value)
 }
 
 const applyModelParameters = () => {
@@ -258,27 +241,28 @@ const applyModelParameters = () => {
 
   const parameters = props.modelParameters
 
-  coreModel.setParameterValueById('ParamAngleX', parameters.angleX)
-  coreModel.setParameterValueById('ParamAngleY', parameters.angleY)
-  coreModel.setParameterValueById('ParamAngleZ', parameters.angleZ)
-  coreModel.setParameterValueById('ParamEyeLOpen', parameters.leftEyeOpen)
-  coreModel.setParameterValueById('ParamEyeROpen', parameters.rightEyeOpen)
-  coreModel.setParameterValueById('ParamEyeSmile', parameters.leftEyeSmile)
-  coreModel.setParameterValueById('ParamBrowLX', parameters.leftEyebrowLR)
-  coreModel.setParameterValueById('ParamBrowRX', parameters.rightEyebrowLR)
-  coreModel.setParameterValueById('ParamBrowLY', parameters.leftEyebrowY)
-  coreModel.setParameterValueById('ParamBrowRY', parameters.rightEyebrowY)
-  coreModel.setParameterValueById('ParamBrowLAngle', parameters.leftEyebrowAngle)
-  coreModel.setParameterValueById('ParamBrowRAngle', parameters.rightEyebrowAngle)
-  coreModel.setParameterValueById('ParamBrowLForm', parameters.leftEyebrowForm)
-  coreModel.setParameterValueById('ParamBrowRForm', parameters.rightEyebrowForm)
-  coreModel.setParameterValueById('ParamMouthOpenY', parameters.mouthOpen)
-  coreModel.setParameterValueById('ParamMouthForm', parameters.mouthForm)
-  coreModel.setParameterValueById('ParamCheek', parameters.cheek)
-  coreModel.setParameterValueById('ParamBodyAngleX', parameters.bodyAngleX)
-  coreModel.setParameterValueById('ParamBodyAngleY', parameters.bodyAngleY)
-  coreModel.setParameterValueById('ParamBodyAngleZ', parameters.bodyAngleZ)
-  coreModel.setParameterValueById('ParamBreath', parameters.breath)
+  setCoreParameter('ParamAngleX', parameters.angleX)
+  setCoreParameter('ParamAngleY', parameters.angleY)
+  setCoreParameter('ParamAngleZ', parameters.angleZ)
+  setCoreParameter('ParamEyeLOpen', parameters.leftEyeOpen)
+  setCoreParameter('ParamEyeROpen', parameters.rightEyeOpen)
+  setCoreParameter('ParamEyeLSmile', parameters.leftEyeSmile)
+  setCoreParameter('ParamEyeRSmile', parameters.rightEyeSmile)
+  setCoreParameter('ParamBrowLX', parameters.leftEyebrowLR)
+  setCoreParameter('ParamBrowRX', parameters.rightEyebrowLR)
+  setCoreParameter('ParamBrowLY', parameters.leftEyebrowY)
+  setCoreParameter('ParamBrowRY', parameters.rightEyebrowY)
+  setCoreParameter('ParamBrowLAngle', parameters.leftEyebrowAngle)
+  setCoreParameter('ParamBrowRAngle', parameters.rightEyebrowAngle)
+  setCoreParameter('ParamBrowLForm', parameters.leftEyebrowForm)
+  setCoreParameter('ParamBrowRForm', parameters.rightEyebrowForm)
+  setCoreParameter('ParamMouthOpenY', parameters.mouthOpen)
+  setCoreParameter('ParamMouthForm', parameters.mouthForm)
+  setCoreParameter('ParamCheek', parameters.cheek)
+  setCoreParameter('ParamBodyAngleX', parameters.bodyAngleX)
+  setCoreParameter('ParamBodyAngleY', parameters.bodyAngleY)
+  setCoreParameter('ParamBodyAngleZ', parameters.bodyAngleZ)
+  setCoreParameter('ParamBreath', parameters.breath)
 }
 
 const applyFocus = () => {
@@ -335,88 +319,39 @@ const startBlinkLoop = () => {
   scheduleBlink()
 }
 
-const extractAvailableMotions = (loadedModel: Live2DModel): Live2DMotion[] => {
-  const definitions = ((loadedModel.internalModel as {
-    motionManager?: { definitions?: Record<string, Array<{ File?: string }> | undefined> }
-  }).motionManager?.definitions ?? {}) as Record<string, Array<{ File?: string }> | undefined>
-
-  return Object.entries(definitions).flatMap(([motionName, definition]) =>
-    (definition?.map((motion, motionIndex) => ({
-      motionName,
-      motionIndex,
-      fileName: motion.File || `${motionName}/${motionIndex}`,
-    })) ?? []),
-  )
+const getMotionDefinitions = (loadedModel: Live2DModel): Live2DMotionDefinitions => {
+  return (loadedModel.internalModel as {
+    motionManager?: { definitions?: Live2DMotionDefinitions }
+  }).motionManager?.definitions ?? {}
 }
 
-const configureSelectedMotionLoop = () => {
-  if (!model.value || !props.currentMotion?.group || props.currentMotion.index == null) {
-    return
-  }
+const bindHitInteraction = (
+  loadedModel: Live2DModel,
+  definitions: Live2DMotionDefinitions,
+) => {
+  clearHitListener()
 
-  const motionManager = ((model.value.internalModel as unknown) as {
-    motionManager?: {
-      groups?: Record<string, string | number>
-      motionGroups?: Array<Array<{ _looper?: { loopDuration?: number } }>>
+  const handleHit = (hitAreas: string[]) => {
+    if (model.value !== loadedModel) {
+      return
     }
-  }).motionManager
 
-  const groupIndex = motionManager?.groups?.[props.currentMotion.group]
-  if (groupIndex == null) {
-    return
-  }
-
-  const numericGroupIndex = typeof groupIndex === 'number' ? groupIndex : Number.parseInt(String(groupIndex), 10)
-  if (Number.isNaN(numericGroupIndex)) {
-    return
-  }
-
-  const motion = motionManager?.motionGroups?.[numericGroupIndex]?.[props.currentMotion.index]
-  if (motion?._looper) {
-    motion._looper.loopDuration = 0
-  }
-}
-
-const applyMotion = async () => {
-  if (!model.value || !props.idleAnimationEnabled) {
-    return
-  }
-
-  if (!props.currentMotion?.group) {
-    return
-  }
-
-  configureSelectedMotionLoop()
-
-  try {
-    await model.value.motion(props.currentMotion.group, props.currentMotion.index, MotionPriority.FORCE)
-  }
-  catch (error) {
-    console.warn('切换 Live2D 动作失败:', error)
-  }
-}
-
-const bindMotionLoop = () => {
-  clearMotionFinishListener()
-
-  const motionManager = (model.value?.internalModel as {
-    motionManager?: { on?: (event: string, handler: () => void) => void, off?: (event: string, handler: () => void) => void }
-  })?.motionManager
-
-  if (!motionManager?.on) {
-    return
-  }
-
-  const handleMotionFinish = () => {
-    if (props.idleAnimationEnabled && props.currentMotion?.group) {
-      void applyMotion()
+    const selectedMotion = selectLive2dClickMotion(definitions, hitAreas)
+    if (selectedMotion === null) {
+      return
     }
+
+    void loadedModel.motion(
+      selectedMotion.group,
+      selectedMotion.index,
+      MotionPriority.FORCE,
+    ).catch((error) => {
+      console.warn('播放 Live2D 点击动作失败:', error)
+    })
   }
 
-  motionManager.on('motionFinish', handleMotionFinish)
-  if (motionManager.off) {
-    removeMotionFinishListener = () => motionManager.off?.('motionFinish', handleMotionFinish)
-  }
+  loadedModel.on('hit', handleHit)
+  removeHitListener = () => loadedModel.off('hit', handleHit)
 }
 
 const handleResize = () => {
@@ -431,30 +366,6 @@ const handleResize = () => {
   }
 
   applyTransform()
-}
-
-const createModelFromSource = async (source: {
-  modelId: string | null
-  modelPath: string | null
-  url: string
-}) => {
-  if (source.modelId && source.modelPath) {
-    try {
-      const files = await loadLive2dFilesWithOpfs({
-        modelId: source.modelId,
-        settingsUrl: source.url,
-        settingsPath: source.modelPath,
-      })
-      const settings = await FileLoader.createSettings(files)
-      await FileLoader.upload(files, settings)
-      return await Live2DModel.from(settings) as Live2DModel
-    }
-    catch (error) {
-      console.warn('[OPFS] Falling back to network model loading:', error)
-    }
-  }
-
-  return await Live2DModel.from(source.url) as Live2DModel
 }
 
 const loadModel = async () => {
@@ -472,11 +383,7 @@ const loadModel = async () => {
   }
 
   try {
-    const loadedModel = await createModelFromSource({
-      modelId: props.modelId,
-      modelPath: props.modelPath,
-      url: sourceUrl,
-    })
+    const loadedModel = await Live2DModel.from(sourceUrl) as Live2DModel
     const isCurrentLoad = () => modelLoadTracker.isCurrent(
       loadToken,
       resolvedModelUrl.value,
@@ -494,19 +401,15 @@ const loadModel = async () => {
     app.value.stage.addChild(loadedModel as never)
     model.value = loadedModel
 
-    emit('motionsLoaded', extractAvailableMotions(loadedModel))
+    const motionDefinitions = getMotionDefinitions(loadedModel)
+    bindHitInteraction(loadedModel, motionDefinitions)
 
     applyTransform()
     applyModelParameters()
     applyFocus()
     applyShadow()
     startBlinkLoop()
-    bindMotionLoop()
     await applyExpression()
-    if (!isCurrentLoad()) {
-      return
-    }
-    await applyMotion()
     if (!isCurrentLoad()) {
       return
     }
@@ -517,7 +420,6 @@ const loadModel = async () => {
       return
     }
     console.error('加载 Live2D 模型失败:', error)
-    emit('motionsLoaded', [])
     emit('error', error instanceof Error ? error.message : '加载 Live2D 模型失败')
   }
 }
@@ -614,14 +516,6 @@ watch(
   () => [props.autoBlinkEnabled, props.forceAutoBlinkEnabled],
   () => {
     startBlinkLoop()
-  },
-)
-
-watch(
-  () => [props.currentMotion?.group, props.currentMotion?.index, props.idleAnimationEnabled],
-  async () => {
-    bindMotionLoop()
-    await applyMotion()
   },
 )
 

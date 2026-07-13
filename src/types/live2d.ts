@@ -18,15 +18,4 @@ export interface Live2DExpressionRequest {
   token: number
 }
 
-export interface Live2DMotion {
-  motionName: string
-  motionIndex: number
-  fileName: string
-}
-
-export interface Live2DMotionSelection {
-  group: string
-  index?: number
-}
-
 export type Live2DExpressionLlmMode = 'all' | 'none' | 'custom'
