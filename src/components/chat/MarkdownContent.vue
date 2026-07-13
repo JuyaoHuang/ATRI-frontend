@@ -4,13 +4,14 @@ import { computed } from 'vue'
 import 'katex/dist/katex.min.css'
 
 import { renderMarkdownWithCache } from '@/utils/markdownRenderCache'
+import { renderMarkdown } from '@/utils/markdownRenderer'
 
 interface Props {
   source: string
 }
 
 const props = defineProps<Props>()
-const rendered = computed(() => renderMarkdownWithCache(props.source))
+const rendered = computed(() => renderMarkdownWithCache(props.source, renderMarkdown))
 </script>
 
 <template>

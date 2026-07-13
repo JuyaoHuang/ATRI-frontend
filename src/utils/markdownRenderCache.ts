@@ -1,9 +1,5 @@
-import {
-  MARKDOWN_RENDERER_VERSION,
-  renderMarkdown,
-  type MarkdownRenderResult,
-  type SanitizedHtml
-} from '@/utils/markdownRenderer'
+import type { MarkdownRenderResult, SanitizedHtml } from '@/utils/markdownRenderer'
+import { MARKDOWN_RENDERER_VERSION } from '@/utils/markdownRendererVersion'
 
 export const DEFAULT_MARKDOWN_CACHE_MAX_ENTRIES = 1_000
 export const DEFAULT_MARKDOWN_CACHE_MAX_BYTES = 32 * 1024 * 1024
@@ -19,7 +15,6 @@ export interface MarkdownRenderCacheOptions {
   maxEntries?: number
   maxBytes?: number
   rendererVersion?: string
-  renderer?: (source: string) => MarkdownRenderResult
 }
 
 export interface MarkdownRenderCacheStats {
@@ -44,7 +39,6 @@ export class MarkdownRenderCache {
   private readonly maxEntries: number
   private readonly maxBytes: number
   private readonly rendererVersion: string
-  private readonly renderer: (source: string) => MarkdownRenderResult
   private approximateBytes = 0
   private hits = 0
   private misses = 0
@@ -54,7 +48,6 @@ export class MarkdownRenderCache {
     this.maxEntries = options.maxEntries ?? DEFAULT_MARKDOWN_CACHE_MAX_ENTRIES
     this.maxBytes = options.maxBytes ?? DEFAULT_MARKDOWN_CACHE_MAX_BYTES
     this.rendererVersion = options.rendererVersion ?? MARKDOWN_RENDERER_VERSION
-    this.renderer = options.renderer ?? renderMarkdown
 
     if (!Number.isInteger(this.maxEntries) || this.maxEntries <= 0) {
       throw new RangeError('Markdown cache maxEntries must be a positive integer')
@@ -109,13 +102,16 @@ export class MarkdownRenderCache {
     return this.entries.has(key)
   }
 
-  render(source: string): MarkdownRenderResult {
+  render(
+    source: string,
+    renderer: (source: string) => MarkdownRenderResult
+  ): MarkdownRenderResult {
     const cached = this.get(source)
     if (cached !== undefined) {
       return { kind: 'html', html: cached }
     }
 
-    const result = this.renderer(source)
+    const result = renderer(source)
     if (result.kind === 'html') {
       this.set(source, result.html)
     }
@@ -160,8 +156,11 @@ export class MarkdownRenderCache {
 
 const sharedMarkdownRenderCache = new MarkdownRenderCache()
 
-export function renderMarkdownWithCache(source: string): MarkdownRenderResult {
-  return sharedMarkdownRenderCache.render(source)
+export function renderMarkdownWithCache(
+  source: string,
+  renderer: (source: string) => MarkdownRenderResult
+): MarkdownRenderResult {
+  return sharedMarkdownRenderCache.render(source, renderer)
 }
 
 export function clearMarkdownRenderCache(): void {

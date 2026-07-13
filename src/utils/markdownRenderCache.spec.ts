@@ -18,17 +18,17 @@ describe('MarkdownRenderCache', () => {
     let renderCalls = 0
     const cache = new MarkdownRenderCache({
       maxEntries: 2,
-      maxBytes: 10_000,
-      renderer: source => {
-        renderCalls += 1
-        return { kind: 'html', html: sanitized(`<p>${source}</p>`) }
-      }
+      maxBytes: 10_000
     })
+    const renderer = (source: string): MarkdownRenderResult => {
+      renderCalls += 1
+      return { kind: 'html', html: sanitized(`<p>${source}</p>`) }
+    }
 
-    cache.render('alpha')
-    cache.render('beta')
-    cache.render('alpha')
-    cache.render('gamma')
+    cache.render('alpha', renderer)
+    cache.render('beta', renderer)
+    cache.render('alpha', renderer)
+    cache.render('gamma', renderer)
 
     expect(renderCalls).toBe(3)
     expect(cache.get('alpha')).toBe('<p>alpha</p>')
@@ -88,15 +88,14 @@ describe('MarkdownRenderCache', () => {
       text: 'raw',
       reason: 'render-error'
     }
-    const cache = new MarkdownRenderCache({
-      renderer: () => {
-        renderCalls += 1
-        return fallback
-      }
-    })
+    const cache = new MarkdownRenderCache()
+    const renderer = () => {
+      renderCalls += 1
+      return fallback
+    }
 
-    expect(cache.render('raw')).toEqual(fallback)
-    expect(cache.render('raw')).toEqual(fallback)
+    expect(cache.render('raw', renderer)).toEqual(fallback)
+    expect(cache.render('raw', renderer)).toEqual(fallback)
     expect(renderCalls).toBe(2)
     expect(cache.getStats()).toMatchObject({ entries: 0, misses: 2 })
   })

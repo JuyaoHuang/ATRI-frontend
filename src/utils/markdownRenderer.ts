@@ -3,6 +3,8 @@ import { tasklist } from '@mdit/plugin-tasklist'
 import DOMPurify, { type Config } from 'dompurify'
 import MarkdownIt from 'markdown-it'
 
+export { MARKDOWN_RENDERER_VERSION } from '@/utils/markdownRendererVersion'
+
 declare const sanitizedHtmlBrand: unique symbol
 
 export type SanitizedHtml = string & {
@@ -17,7 +19,6 @@ export type MarkdownRenderResult =
       reason: 'empty' | 'too-large' | 'render-error'
     }
 
-export const MARKDOWN_RENDERER_VERSION = 'chat-markdown-v1'
 export const MAX_MARKDOWN_SOURCE_CHARS = 200_000
 export const MAX_RENDERED_HTML_CHARS = 2_000_000
 
