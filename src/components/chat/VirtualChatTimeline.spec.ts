@@ -29,9 +29,54 @@ interface TimelineHarness {
 }
 
 const originalDescriptors = new Map<string, PropertyDescriptor | undefined>()
+const originalWindowDescriptors = new Map<string, PropertyDescriptor | undefined>()
+const resizeObservers = new Set<LayoutResizeObserver>()
+let rowHeightMultiplier = 1
+
+class LayoutResizeObserver {
+  private readonly callback: ResizeObserverCallback
+  private readonly observedElements = new Set<Element>()
+
+  constructor(callback: ResizeObserverCallback) {
+    this.callback = callback
+    resizeObservers.add(this)
+  }
+
+  observe(target: Element): void {
+    this.observedElements.add(target)
+  }
+
+  unobserve(target: Element): void {
+    this.observedElements.delete(target)
+  }
+
+  disconnect(): void {
+    this.observedElements.clear()
+    resizeObservers.delete(this)
+  }
+
+  takeRecords(): ResizeObserverEntry[] {
+    return []
+  }
+
+  trigger(): void {
+    const entries = [...this.observedElements].map(target => ({
+      target,
+      borderBoxSize: [{
+        inlineSize: (target as HTMLElement).offsetWidth,
+        blockSize: (target as HTMLElement).offsetHeight
+      }]
+    })) as unknown as ResizeObserverEntry[]
+    this.callback(entries, this as unknown as ResizeObserver)
+  }
+}
 
 function rememberDescriptor(name: string): void {
   originalDescriptors.set(name, Object.getOwnPropertyDescriptor(HTMLElement.prototype, name))
+}
+
+function rememberWindowDescriptor(name: string): void {
+  originalWindowDescriptors.set(name, Object.getOwnPropertyDescriptor(window, name))
 }
 
 function defineLayoutProperty(name: string, get: (element: HTMLElement) => number): void {
@@ -54,7 +99,7 @@ function installLayoutMocks(): void {
     }
     if (element.classList.contains('virtual-chat-row')) {
       const index = Number(element.dataset.index ?? 0)
-      return 72 + (index % 5) * 24
+      return Math.round((72 + (index % 5) * 24) * rowHeightMultiplier)
     }
     return 0
   })
@@ -81,6 +126,13 @@ function installLayoutMocks(): void {
       this.dispatchEvent(new Event('scroll'))
     }
   })
+
+  rememberWindowDescriptor('ResizeObserver')
+  Object.defineProperty(window, 'ResizeObserver', {
+    configurable: true,
+    writable: true,
+    value: LayoutResizeObserver
+  })
 }
 
 function restoreLayoutMocks(): void {
@@ -92,6 +144,42 @@ function restoreLayoutMocks(): void {
     }
   }
   originalDescriptors.clear()
+
+  for (const [name, descriptor] of originalWindowDescriptors) {
+    if (descriptor) {
+      Object.defineProperty(window, name, descriptor)
+    } else {
+      delete (window as unknown as Record<string, unknown>)[name]
+    }
+  }
+  originalWindowDescriptors.clear()
+  resizeObservers.clear()
+  rowHeightMultiplier = 1
+}
+
+function triggerResizeObservers(): void {
+  for (const observer of [...resizeObservers]) {
+    observer.trigger()
+  }
+}
+
+function rowStart(row: Element): number {
+  const transform = (row as HTMLElement).style.transform
+  return Number.parseFloat(transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? '0')
+}
+
+function viewportAnchor(harness: TimelineHarness): { key: string, offset: number } {
+  const container = scrollContainer(harness)
+  const rows = [...harness.host.querySelectorAll<HTMLElement>('.virtual-chat-row')]
+  const row = rows
+    .filter(candidate => rowStart(candidate) <= container.scrollTop)
+    .sort((left, right) => rowStart(left) - rowStart(right))
+    .at(-1) ?? rows[0]
+  const key = row?.getAttribute('data-chat-message-key')
+  if (!row || !key) {
+    throw new Error('No row intersects the viewport anchor')
+  }
+  return { key, offset: rowStart(row) - container.scrollTop }
 }
 
 function message(index: number, prefix = 'message', chatId = 'chat-a'): ChatMessageItem {
@@ -232,6 +320,46 @@ describe('VirtualChatTimeline', () => {
     expect(container.scrollTop).toBeGreaterThan(previousTop)
     expect(container.scrollHeight - container.clientHeight - container.scrollTop)
       .toBeLessThanOrEqual(32)
+  })
+
+  it('reuses cached sanitized HTML when virtual rows unmount and remount', async () => {
+    const harness = track(mountTimeline(
+      Array.from({ length: 160 }, (_, index) => message(index))
+    ))
+    await settleTimeline()
+    const container = scrollContainer(harness)
+    const hitsBeforeRemount = getMarkdownRenderCacheStats().hits
+
+    container.scrollTop = 0
+    container.dispatchEvent(new Event('scroll'))
+    await settleTimeline()
+    container.scrollTop = Math.max(container.scrollHeight - container.clientHeight, 0)
+    container.dispatchEvent(new Event('scroll'))
+    await settleTimeline()
+
+    expect(getMarkdownRenderCacheStats().hits).toBeGreaterThan(hitsBeforeRemount)
+  })
+
+  it('preserves the logical viewport anchor when rendered row heights change', async () => {
+    const harness = track(mountTimeline(
+      Array.from({ length: 200 }, (_, index) => message(index))
+    ))
+    await settleTimeline()
+    const container = scrollContainer(harness)
+
+    container.scrollTop = 4_000
+    container.dispatchEvent(new Event('scroll'))
+    await new Promise(resolve => setTimeout(resolve, 180))
+    await settleTimeline()
+    const anchorBefore = viewportAnchor(harness)
+
+    rowHeightMultiplier = 1.5
+    triggerResizeObservers()
+    await settleTimeline()
+    const anchorAfter = viewportAnchor(harness)
+
+    expect(anchorAfter.key).toBe(anchorBefore.key)
+    expect(Math.abs(anchorAfter.offset - anchorBefore.offset)).toBeLessThanOrEqual(8)
   })
 
   it('preserves a visible stable-key anchor when older messages are prepended', async () => {

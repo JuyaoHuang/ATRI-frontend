@@ -131,6 +131,11 @@ export function useVirtualChatTimeline({
     scrollEndThreshold: tailThreshold,
     useAnimationFrameWithResizeObserver: true
   })))
+  virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (
+    item,
+    _delta,
+    instance
+  ) => item.start < (instance.scrollOffset ?? 0)
 
   const visibleRows = computed<VisibleVirtualChatRow[]>(() => {
     const currentRows = rows.value
